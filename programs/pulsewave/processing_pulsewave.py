@@ -12,7 +12,7 @@ import sys
 import time
 import numba
 import math
-
+import re
 """ サードバーティライブラリのインポート """
 import numpy as np
 from scipy import signal
@@ -79,6 +79,36 @@ def interpolate_nan(data):
     data[nan_indx] = func_inpl(x[nan_indx])
         
     return data
+
+def upsample_data(data_original, sampling_rate_upsampled):
+    """
+    元データを，指定したサンプリングレートにアップサンプリングする（3次スプライン補間を使用）．
+
+    Parameters
+    ----------
+    data_original: np.array (1 dim)
+        元データ
+    sampling_rate_upsampled: int
+        アップサンプリング後のサンプリングレート
+
+    Returns
+    -------
+    data_upsampled: np.array (1 dim)
+        アップサンプリング後のデータ
+    """
+
+    # 元のデータ点に対応する時間値を計算
+    sampling_rate_original = len(data_original)
+    time_original = np.linspace(0, 1, sampling_rate_original)
+
+    # 3次スプライン補間関数の作成
+    spline_interpolator = interp1d(time_original, data_original, kind="cubic")
+
+    # アップサンプリング後のデータ点の生成
+    time_upsampled = np.linspace(0, 1, sampling_rate_upsampled)
+    data_upsampled = spline_interpolator(time_upsampled)
+
+    return data_upsampled
 
 def resample_timestamp(time_stmp, data, resample_rate, data_num=0, kind='cubic', time_range=0, start_time=0):
     """

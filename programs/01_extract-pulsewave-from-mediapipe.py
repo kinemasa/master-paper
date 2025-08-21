@@ -29,11 +29,11 @@ def main():
     parent_path =current_path.parents[1]
     saved_folder = str(parent_path)+"\\results\\saved_pulse-band\\"
     # saved_folder = str(parent_path)+"\\saved_pulse-band\\"
-    saved_subfolder =str(saved_folder) +"subject1-nb1\\"
-    sampling_rate = 60
-    bandpath_width = [0.75,3.0]
+    saved_subfolder =str(saved_folder) +"subject1-ubfc1-30s\\"
+    sampling_rate = 30
+    bandpath_width = [0.75,4.0]
     start_time = 1
-    time = 5
+    time = 30
     frame_num = sampling_rate*time
     
     input_folder = select_folder()
