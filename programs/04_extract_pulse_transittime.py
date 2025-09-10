@@ -111,34 +111,22 @@ def get_representative_features(csv_file,sample_rate,resampling_rate,margin_ppg,
 
 
 def main():
-    print("Ss")
+
     input_csv_file = select_file(message="ファイルを選択してください")
     sampling_rate = 30
     resampling_rate = 256
-    margin_ppg = 0
-    margin_dppg =3
-    plot_ppg = False
-    plot_dppg = False
-    
-    
-    features_cn_array,features_cn_names,features_dr_array,features_dr_names = get_representative_features(input_csv_file,sampling_rate,resampling_rate,margin_ppg,margin_dppg,plot_ppg,plot_dppg)
-    # 全部まとめる
-    features_all = np.concatenate([features_cn_array, features_dr_array])
-    feature_names_all = features_cn_names + features_dr_names
 
-    df_features = pd.DataFrame([features_all], columns=feature_names_all)
-    
-    # ターミナル出力
-    print("=== 抽出した特徴量 DataFrame ===")
-    print(df_features.to_string(index=False))  # index番号を表示しない
-    print("================================")
+    df = pd.read_csv(input_csv_file)
+    if df.shape[1] < 2:
+        raise ValueError("CSVファイルは 'time, pulse_value' の2列が必要です。")
+    time = df.iloc[:, 0].values
+    pulse = df.iloc[:, 1].values *(-1)
     
     # CSV保存
     parent_dir = Path(input_csv_file).parent
     features_dir = parent_dir / "features"
     features_dir.mkdir(exist_ok=True)
     save_path = features_dir /(Path(input_csv_file).stem + "_features.csv")
-    df_features.to_csv(save_path, index=False, encoding="utf-8-sig")
     print("Done!")
     
 if __name__ =="__main__":

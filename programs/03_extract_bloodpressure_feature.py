@@ -5,7 +5,9 @@ from pathlib import Path
 import cv2
 from scipy import signal
 import pandas as pd
-import matplotlib.pyplot as plt 
+
+
+import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from scipy.signal import hilbert
 ## ファイル用ライブラリ
@@ -25,6 +27,15 @@ def normalize_by_envelope(signal):
     envelope[envelope == 0] = 1e-8
     normalized = signal / envelope
     return normalized, envelope
+
+def infer_subject_method_roi(csv_path: Path):
+
+    p = csv_path if isinstance(csv_path, Path) else Path(csv_path)
+    roi     = p.parent.name if p.parent else ""
+    method  = p.parent.parent.name if p.parent and p.parent.parent else ""
+    subject = p.parent.parent.parent.name if p.parent and p.parent.parent and p.parent.parent.parent else ""
+    return subject, method, roi
+
 
 def get_representative_features(csv_file,sample_rate,resampling_rate,margin_ppg,margin_dppg,plot_ppg,plot_dppg):
     """
@@ -102,7 +113,7 @@ def get_representative_features(csv_file,sample_rate,resampling_rate,margin_ppg,
     # valley以降を置き換え
     t2_pulsewave_dppg[first_valley:] = t2_ex_corrected
 
-    features_cn_array,features_cn_names = calc_contour_features(t2_for_ppg,sample_rate,True)
+    features_cn_array,features_cn_names = calc_contour_features(t2_for_ppg,resampling_rate,True)
     features_dr_array,features_dr_names ,dr_1st,dr_2nd,dr_3rd,dr_4th = calc_dr_features(t2_pulsewave_dppg, resampling_rate,True)
     
     
@@ -111,7 +122,6 @@ def get_representative_features(csv_file,sample_rate,resampling_rate,margin_ppg,
 
 
 def main():
-
     input_csv_file = select_file(message="ファイルを選択してください")
     sampling_rate = 30
     resampling_rate = 256
@@ -126,7 +136,18 @@ def main():
     features_all = np.concatenate([features_cn_array, features_dr_array])
     feature_names_all = features_cn_names + features_dr_names
 
+
+    print("CN特徴量数:", len(features_cn_array))
+    print("DR特徴量数:", len(features_dr_array))
+    print("合計特徴量数:", len(features_cn_array) + len(features_dr_array))
     df_features = pd.DataFrame([features_all], columns=feature_names_all)
+    
+
+    subject, method, roi = infer_subject_method_roi(Path(input_csv_file))
+    
+    df_features.insert(0, "roi", roi)
+    df_features.insert(0, "method", method)
+    df_features.insert(0, "subject", subject)
     
     # ターミナル出力
     print("=== 抽出した特徴量 DataFrame ===")
@@ -140,6 +161,6 @@ def main():
     save_path = features_dir /(Path(input_csv_file).stem + "_features.csv")
     df_features.to_csv(save_path, index=False, encoding="utf-8-sig")
     print("Done!")
-    
+
 if __name__ =="__main__":
     main()

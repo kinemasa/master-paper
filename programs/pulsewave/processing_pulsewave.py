@@ -13,6 +13,7 @@ import time
 import numba
 import math
 import re
+
 """ サードバーティライブラリのインポート """
 import numpy as np
 from scipy import signal
@@ -24,7 +25,7 @@ from scipy.sparse import csc_matrix, lil_matrix
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import seaborn
-
+from scipy.signal import hilbert
 
 #===============================
 #データ補間
@@ -876,4 +877,13 @@ def interpolate_nan(data):
         
     return data
 
-
+def normalize_by_envelope(signal):
+    """
+    Hilbert変換で包絡線を計算し、信号を包絡線で割って高さを揃える
+    """
+    analytic_signal = hilbert(signal)
+    envelope = np.abs(analytic_signal)
+    # 0割防止
+    envelope[envelope == 0] = 1e-8
+    normalized = signal / envelope
+    return normalized, envelope

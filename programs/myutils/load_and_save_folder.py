@@ -35,8 +35,6 @@ def load_pulse_csv(filepath):
         if "time_sec" not in df.columns or "pulse" not in df.columns:
             df = pd.read_csv(filepath, header=None)
             df.columns = ['time_sec', 'pulse']
-            print("フッターを追加")
-        
         return df
     except Exception as e:
         print(f"読み込みエラー: {e}")

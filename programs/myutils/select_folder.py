@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog
+from pathlib import Path
 
 def select_folder(message="フォルダを選択してください"):
     root = tk.Tk()
@@ -26,3 +27,35 @@ def select_file(message="ファイルを選択してください"):
     else:
         print("ファイルが選択されませんでした。")
     return file_path
+
+def select_files_n(n: int):
+    """
+    まとめて選ぶ/繰り返し選ぶ両対応。
+    - 最初に複数選択ダイアログを出して n 個まで採用
+    - 不足があれば追加でダイアログを出す
+    """
+    root = tk.Tk()
+    root.withdraw()
+
+    paths = []
+    # 1回目：複数選択
+    chosen = filedialog.askopenfilenames(
+        title=f"選択するCSVを最大{n}個まで選んでください",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+    )
+    paths.extend(list(chosen)[:n])
+
+    # 不足していれば追加で聞く
+    while len(paths) < n:
+        remain = n - len(paths)
+        another = filedialog.askopenfilename(
+            title=f"あと{remain}個選択してください",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not another:
+            break
+        paths.append(another)
+
+    root.update()
+    root.destroy()
+    return [Path(p) for p in paths[:n]]

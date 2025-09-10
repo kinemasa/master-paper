@@ -39,7 +39,7 @@ class Param():
                     [57, 212, 210, 169, 150, 149, 176, 140, 204, 43], 
                     [287, 273, 424, 369, 400, 378, 379, 394, 430, 432]]
                     # The list containing sequence numbers of selected keypoints of different ROIs. Size = [num_roi].
-    list_roi_name= ['lower medial forehead', 
+    list_roi_name= ['medial forehead', 
                     'left lower lateral forehead', 
                     'right lower lateral forehead', 
                     'glabella', 
