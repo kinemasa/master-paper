@@ -12,7 +12,7 @@ from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import get_sorted_image_files,save_pulse_to_csv
 
 ## 脈波取得用ライブラリ
-from pulsewave.extract_pulsewave import Green ,extract_pulsewave
+from pulsewave.extract_pulsewave import extract_pulsewave
 
 ## 脈波信号処理用ライブラリ
 from pulsewave.processing_pulsewave import bandpass_filter_pulse,sg_filter_pulse,detrend_pulse,detect_pulse_peak,normalize_by_envelope
@@ -80,13 +80,12 @@ def plot_bvp_rois(bvp_rois: np.ndarray, sampling_rate: float,
     plt.legend(ncol=3, fontsize=8)
     plt.tight_layout()
     plt.show()    
+    
+
 
 def main():
     
-    current_path = Path(__file__)
-    parent_path =current_path.parents[1]
-    saved_folder = str(parent_path)+"\\results\\saved_pulse-band\\"
-    saved_subfolder =str(saved_folder) +"subject1-ubfc1-30s-all\\"
+    
     sampling_rate = 30
     bandpath_width = [0.75,4.0]
     start_time = 0
@@ -97,6 +96,11 @@ def main():
     
     input_folder = select_folder()
     input_image_paths = get_sorted_image_files(input_folder,frame_num)
+    
+    current_path = Path(input_folder)
+    parent_path =current_path.parents[0]
+    saved_folder = str(parent_path)+"\\rPPG-pulse\\"
+    # saved_subfolder =str(saved_folder) +"subject1-ubfc1-30s-all\\"
     
     detector = FaceDetector(Param)
     
@@ -188,7 +192,7 @@ def main():
             
             # 保存用サブフォルダ（ROIごとに分ける）
             
-            saved_subfolders = saved_subfolder+f"{method}//"+ f"{name.replace(' ', '_')}"
+            saved_subfolders = saved_folder+f"{method}//"+ f"{name.replace(' ', '_')}"
             os.makedirs(saved_subfolders,exist_ok=True)
         
 

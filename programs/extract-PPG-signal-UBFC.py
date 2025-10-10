@@ -3,11 +3,40 @@ import os
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from myutils.select_folder import select_file
+from myutils.select_folder import select_file,select_folder
+from pulsewave.plot_pulsewave import  plot_pulse_wave
 
+def process_folder_recursive(root_folder, normalize=True, plot=False):
+    """
+    フォルダ以下のすべてのサブフォルダ・孫フォルダを含めて処理する
+    """
+    for dirpath, _, filenames in os.walk(root_folder):
+        for fname in filenames:
+            if fname.endswith(".txt") or fname.endswith(".xmp"):
+                file_path = os.path.join(dirpath, fname)
+                process_ubfc_dataset(file_path, normalize=normalize, plot=plot)
 
+def process_folder(folder_path, normalize=True, plot=False):
+    """
+    フォルダ内のすべての .txt ファイルを処理
+    """
+    if not os.path.isdir(folder_path):
+        print(f"Error: '{folder_path}' is not a directory.")
+        return
+    
+    
+    files = [f for f in os.listdir(folder_path) if f.endswith(".txt")]
+    if not files:
+        print("No .txt files found in the folder.")
+        return
+
+    for fname in files:
+        file_path = os.path.join(folder_path, fname)
+        process_ubfc_dataset(file_path, normalize=normalize, plot=plot)
+        
 def process_ubfc_dataset(file_path, out_csv="ppg_output.csv", normalize=True, plot=True):
     """
     UBFC-RPPG ground truth ファイルから PPG と時間を読み取り、
@@ -70,18 +99,33 @@ def process_ubfc_dataset(file_path, out_csv="ppg_output.csv", normalize=True, pl
         plt.tight_layout()
         plt.show()
 
+        # 保存パスを決定（元ファイルと同じフォルダ）
+    base_dir = os.path.dirname(os.path.abspath(file_path))
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    if out_csv is None:
+        save_path = os.path.join(base_dir, f"{base_name}_ppg.csv")
+    else:
+        # 絶対パスならそのまま、相対/ファイル名のみなら同じフォルダへ
+        save_path = out_csv if os.path.isabs(out_csv) else os.path.join(base_dir, out_csv)
+
     # CSV保存
     if gt_time is not None and gt_trace is not None:
         df_out = pd.DataFrame({"time_sec": gt_time, "pulse": gt_trace})
-        df_out.to_csv(out_csv, index=False)
-        print(f"Saved -> {os.path.abspath(out_csv)}")
+        df_out.to_csv(save_path, index=False)
+        print(f"Saved -> {save_path}")
     else:
         print("No data to save.")
+
         
 
 def main():
-    input_file = select_file(message="ファイルを選択")
-    process_ubfc_dataset(input_file)
+
+# フォルダを選択して一括処理
+    folder = select_folder(message="フォルダを選択してください")
+    if folder:
+        process_folder_recursive(folder, normalize=True, plot=False)  # プロットはオフ（大量処理時に便利）
+    else:
+        print("キャンセルされました。")
     
     
     

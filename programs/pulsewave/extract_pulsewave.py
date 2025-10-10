@@ -111,6 +111,14 @@ def extract_pulsewave(pulse_dict,fps,method="GREEN",roi_order=None,fill_nan=True
         
         bvp = method_pos(X,fps)
         
+    elif method =="Hemo":
+        
+        bvp = method_skinseparation(X)
+        
+    elif method == "Robust":
+        # 照明＋動きロバスト版（重みなしLGI + 濃度変換）
+        bvp,_ = robust_rppg_equal_per_roi(X, fps)
+        
     return bvp, used_roi_order
 
 #===================================================================
@@ -128,6 +136,55 @@ def method_lgi(X):
     P = np.tile(np.eye(3, dtype=np.float32), (X.shape[0],1,1)) - S @ np.swapaxes(S,1,2)
     Y = P @ X                           # (N,3,T)
     return Y[:, 1, :].astype(np.float32)  # 第2成分（G側）
+
+def method_lgi2(X):
+    """LGI: 入力 (N,3,T) → 出力 (N,T)"""
+    U, _, _ = np.linalg.svd(X)          # batched SVD
+    S = U[:, :, 0][:, :, None]          # (N,3,1)
+    P = np.tile(np.eye(3, dtype=np.float32), (X.shape[0],1,1)) - S @ np.swapaxes(S,1,2)
+    Y = P @ X                           # (N,3,T)
+    
+    U, _, _ = np.linalg.svd(Y)          # batched SVD
+    S = U[:, :, 0][:, :, None]          # (N,3,1)
+    P = np.tile(np.eye(3, dtype=np.float32), (Y.shape[0],1,1)) - S @ np.swapaxes(S,1,2)
+    Y2 = P @Y
+    return Y2[:, 1, :].astype(np.float32)  # 第2成分（G側）
+
+def cpu_LGI(signal):
+    """
+    LGI method on CPU using Numpy.
+
+    Pilz, C. S., Zaunseder, S., Krajewski, J., & Blazek, V. (2018). Local group invariance for heart rate estimation from face videos in the wild. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops (pp. 1254-1262).
+    """
+    X = signal
+    U, _, _ = np.linalg.svd(X)
+    S = U[:, :, 0]
+    S = np.expand_dims(S, 2)
+    sst = np.matmul(S, np.swapaxes(S, 1, 2))
+    p = np.tile(np.identity(3), (S.shape[0], 1, 1))
+    P = p - sst
+    Y = np.matmul(P, X)
+    bvp = Y[:, 1, :]
+    return bvp.astype(np.float32) 
+
+def cpu_LGI(signal):
+    """
+    LGI method on CPU using Numpy.
+
+    Pilz, C. S., Zaunseder, S., Krajewski, J., & Blazek, V. (2018). Local group invariance for heart rate estimation from face videos in the wild. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops (pp. 1254-1262).
+    """
+    X = signal
+    U, _, _ = np.linalg.svd(X)
+    S = U[:, :, 0]
+    S = np.expand_dims(S, 2)
+    sst = np.matmul(S, np.swapaxes(S, 1, 2))
+    p = np.tile(np.identity(3), (S.shape[0], 1, 1))
+    P = p - sst
+    Y = np.matmul(P, X)
+    bvp = Y[:, 1, :]
+    return bvp.astype(np.float32) 
+
+
 
 def method_chrom(X: np.ndarray) -> np.ndarray:
     """
@@ -353,129 +410,116 @@ def method_omit(X: np.ndarray) -> np.ndarray:
     return out
 
 
-
-
-
-# def method_ssr_raw(raw_signal: np.ndarray, fps: float) -> np.ndarray:
-#     """
-#     SSR (Wang et al., 2015)
-#     raw_signal : (T, H, W, 3) float32  ※skin以外は0埋めだとそのまま使える
-#     fps        : float
-#     return     : (1, T) float32
-#     """
-#     def __build_p(tau, k, l, U, L):
-#         SR = np.zeros((3, l), np.float32)
-#         z = 0
-#         for t in range(tau, k, 1):
-#             a = L[0, t]; b = L[1, tau]; c = L[2, tau]
-#             d = U[:, 0, t].T; e = U[:, 1, tau]; f = U[:, 2, tau]
-#             g = U[:, 1, tau].T; h = U[:, 2, tau].T
-#             x7 = np.sqrt(a / b); x8 = np.sqrt(a / c)
-#             x4 = np.dot(d, np.outer(e, g))
-#             x6 = np.dot(d, np.outer(f, h))
-#             SR[:, z] = x7 * x4 + x8 * x6
-#             z += 1
-#         s0, s1 = SR[0, :], SR[1, :]
-#         p = s0 - (np.std(s0) / (np.std(s1) + 1e-9)) * s1
-#         p -= p.mean()
-#         return p
-
-#     def __corr_mat(V):
-#         Vt = V.T             # (3, Npix)
-#         N = V.shape[0]
-#         C = (Vt @ V) / max(N, 1)
-#         return C
-
-#     def __eigs(C):
-#         L, U = np.linalg.eig(C)
-#         idx = np.argsort(L)[::-1]
-#         return L[idx], U[:, idx]
-
-#     raw_sig = raw_signal.astype(np.float32)
-#     K = raw_sig.shape[0]                  # T
-#     l = int(max(1, round(float(fps))))    # stride=1s 相当（論文は 1秒）
-#     P = np.zeros(K, dtype=np.float32)
-#     Ls = np.zeros((3, K), np.float32)
-#     Us = np.zeros((3, 3, K), np.float32)
-
-#     for k in range(K):
-#         V = raw_sig[k]                    # (H, W, 3)
-#         idx2 = (V[...,0]!=0) & (V[...,1]!=0) & (V[...,2]!=0)
-#         V_skin = V[idx2].reshape(-1, 3)   # (Npix,3)
-#         if V_skin.size == 0:
-#             Ls[:, k] = 0; Us[:, :, k] = np.eye(3, dtype=np.float32)
-#         else:
-#             C = __corr_mat(V_skin)        # (3,3)
-#             Ls[:, k], Us[:, :, k] = __eigs(C)
-
-#         if k >= l:
-#             tau = k - l + 1
-#             p = __build_p(tau, k, l, Us, Ls)
-#             P[tau:k+1] += p
-
-#     return P[None, :].astype(np.float32)  # (1,T)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ==========================================
-#  musi
-# ==========================================
-def get_green_mean(image_path, roi):
-    """指定ROI内のG成分の平均を計算"""
-    image = cv2.imread(image_path)
-    if image is None:
-        raise ValueError(f"画像が読み込めませんでした: {image_path}")
-    x, y, w, h = roi
-    roi_img = image[y:y+h, x:x+w]  # ROI抽出
-    green_channel = roi_img[:, :, 1]  # Gチャンネル
-    return np.mean(green_channel)
-
-def Green(image_paths,roi):
+def method_skinseparation(X, eps=1e-8):
     """
-    各画像のROI領域のG成分の平均を計算してリストで返す関数。
-    Returns:
-        List of tuples: (ファイル名, G平均)
+    入力: X ... (N, 3, T)  RGB時系列（0..255相当でもOK）
+    出力: (N, T) ヘモグロビン寄与の時系列（符号付きの“濃度寄与”）
+           ※見た目を合わせたいなら np.exp(-hemo) などで整形してもよい
+
+    手順（各フレーム列をピクセル→フレーム平均に見立てて計算）:
+    1) 正規化 → 濃度空間 S = -log(R,G,B)
+    2) 陰影方向(1,1,1)を除去（肌色平面上へ投影）
+    3) [melanin, hemoglobin] で分解 → hemoglobin系列
     """
-    green_means = []
-    for path in image_paths:
-        try:
-            mean_val = get_green_mean(path, roi)
-            green_means.append(mean_val)
-            print(f"{os.path.basename(path)}: 平均G = {mean_val:.2f}")
-        except Exception as e:
-            print(f"エラー（{path}）: {e}")
-    return green_means
+    
+    _MELANIN = np.array([0.4143, 0.3570, 0.8372], dtype=np.float64)
+    _HEMOGLOBIN = np.array([0.2988, 0.6838, 0.6657], dtype=np.float64)
+    _WHITE = np.array([1.0, 1.0, 1.0], dtype=np.float64)  # 照明（陰影）方向
+    N, C, T = X.shape
+    assert C == 3
+
+    # 0..1正規化（>=1ならそのまま）＆ゼロ保護
+    Xf = X.astype(np.float64)
+    if Xf.max() > 1.5:
+        Xf = Xf / 255.0
+    Xf = np.clip(Xf, eps, 1.0)
+
+    # 濃度空間
+    S = -np.log(Xf)  # (N,3,T)
+
+    # 肌色平面法線 & 陰影除去
+    n = np.cross(_MELANIN, _HEMOGLOBIN)  # (3,)
+    denom = np.dot(n, _WHITE) + eps      # スカラー
+
+    # t = -(n·S) / (n·WHITE) をフレームごとに
+    # n·S: (3,)·(N,3,T) → (N,T)
+    numer = np.einsum('c,nct->nt', n, S)
+    t = -numer / denom                   # (N,T)
+
+    # skin_flat = t*WHITE + S
+    skin_flat = S + np.einsum('nt,c->nct', t, _WHITE)  # (N,3,T)
+
+    # 分解（pinv([mel,heme])）
+    M = np.stack([_MELANIN, _HEMOGLOBIN], axis=1)  # (3,2)
+    M_pinv = np.linalg.pinv(M)                     # (2,3)
+
+    # (N,3,T) → (N,T,3) → (N,T,2)
+    sf_Tc = np.moveaxis(skin_flat, 1, 2)           # (N,T,3)
+    comp = np.einsum('ab,ntb->nta', M_pinv, sf_Tc) # (N,T,2)
+    hemo = comp[..., 1]                            # (N,T)
+
+    # 必要なら“見た目整形”:
+    # return np.exp(-np.clip(hemo, 0, None))
+    return hemo
+
+import numpy as np
+from scipy.signal import butter, filtfilt
+
+def bandpass(x, fs, lo=0.7, hi=3.0, order=3):
+    b, a = butter(order, [lo/(fs/2), hi/(fs/2)], btype='band')
+    return filtfilt(b, a, x, axis=-1, padlen=min(3*max(len(a),len(b)), x.shape[-1]-1))
+
+def method_skinseparation_with_skinflat(X, eps=1e-8):
+    # 濃度空間→陰影除去→[mel, hemo]分解（hemoは品質確認などに使える）
+    _MELANIN    = np.array([0.4143, 0.3570, 0.8372], dtype=np.float64)
+    _HEMOGLOBIN = np.array([0.2988, 0.6838, 0.6657], dtype=np.float64)
+    _WHITE      = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+
+    N, C, T = X.shape
+    assert C == 3
+    Xf = X.astype(np.float64)
+    if Xf.max() > 1.5: Xf = Xf / 255.0
+    Xf = np.clip(Xf, eps, 1.0)
+
+    S = -np.log(Xf)  # 濃度空間 (N,3,T)
+    n = np.cross(_MELANIN, _HEMOGLOBIN)
+    denom = np.dot(n, _WHITE) + eps
+    numer = np.einsum('c,nct->nt', n, S)
+    t = -numer / denom
+    skin_flat = S + np.einsum('nt,c->nct', t, _WHITE)  # 陰影除去後 (N,3,T)
+
+    M = np.stack([_MELANIN, _HEMOGLOBIN], axis=1)  # (3,2)
+    M_pinv = np.linalg.pinv(M)                      # (2,3)
+    sf_Tc = np.moveaxis(skin_flat, 1, 2)           # (N,T,3)
+    comp = np.einsum('ab,ntb->nta', M_pinv, sf_Tc) # (N,T,2)
+    hemo = comp[..., 1]                            # (N,T)
+    return hemo, skin_flat
+
+def lgi_global_on_skinflat(skin_flat):
+    # 全ROIを束ねて第1特異ベクトル s を推定→P=I-ss^T を全ROIに適用
+    N, C, T = skin_flat.shape
+    X = skin_flat - skin_flat.mean(axis=-1, keepdims=True)
+    std = X.std(axis=-1, keepdims=True) + 1e-8
+    X = X / std
+    Xg = X.mean(axis=0)                       # (3,T)
+    U, _, _ = np.linalg.svd(Xg, full_matrices=False)
+    s = U[:, 0:1]                             # (3,1)
+    P = np.eye(3) - (s @ s.T)                 # (3,3)
+    Y = np.einsum('cd,ndt->nct', P, X)        # (N,3,T)
+    return Y
+
+def robust_rppg_equal_per_roi(X, fs):
+    """
+    入力: X (N,3,T)
+    出力: g_like (N,T)  # ROIごとの“緑相当”BVP（LGI＋バンドパス後）
+           hemo   (N,T)  # 参考: ヘモ系列
+    """
+    hemo, skin_flat = method_skinseparation_with_skinflat(X)  # (N,T), (N,3,T)
+
+    # LGI（全ROI束ねて s を推定 → 各ROIに P を適用）
+    Y = lgi_global_on_skinflat(skin_flat)                     # (N,3,T)
+
+    # 緑相当成分を取り出してバンドパス
+    g_like = Y[:, 1, :]                                       # (N,T)
+    g_like = bandpass(g_like, fs, 0.7, 3.0, order=3)          # (N,T)
+    return g_like.astype(np.float32), hemo

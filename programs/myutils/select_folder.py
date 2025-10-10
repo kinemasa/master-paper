@@ -1,6 +1,12 @@
 import tkinter as tk
 from tkinter import filedialog
 from pathlib import Path
+import re 
+
+def natural_key(s):
+    """自然順ソート用キー"""
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split(r'(\d+)', str(s))]
 
 def select_folder(message="フォルダを選択してください"):
     root = tk.Tk()
@@ -59,3 +65,10 @@ def select_files_n(n: int):
     root.update()
     root.destroy()
     return [Path(p) for p in paths[:n]]
+
+
+def list_signal_files(folder, exts=(".csv", ".txt")):
+    """フォルダ内の対象拡張子ファイルをソートして返す"""
+    folder = Path(folder)
+    files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in exts]
+    return sorted(files, key=lambda p: natural_key(p.name))

@@ -11,7 +11,7 @@ from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import get_sorted_image_files, save_pulse_to_csv
 
 ## 脈波取得用ライブラリ
-from pulsewave.extract_pulsewave import Green
+from pulsewave.extract_pulsewave import method_green
 
 ## 脈波信号処理用ライブラリ
 from pulsewave.processing_pulsewave import (
@@ -26,12 +26,9 @@ from roiSelector.visualize_roi import visualize_tracking_roi
 ## 脈波表示用
 from pulsewave.plot_pulsewave import plot_pulse_wave
 
-# =========================
-# 追加: モード切り替え
-#   "auto"   -> FaceDetector+Param.list_roi_name による自動ROI（あなたの現行方式）
-#   "manual" -> select_roi（cv2.selectROIs）で手動矩形ROIを選択
-# =========================
-MODE = "manual"   # "manual" にすると手動選択
+os.environ["MKL_THREADING_LAYER"] = "GNU"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 
 def plot_multi_roi(processed_signals_dict, sampling_rate, start_time_sec, duration_sec=5.0, title="Multi-ROI (5s)"):
     start_idx = int(start_time_sec * sampling_rate)
@@ -100,17 +97,21 @@ def nan_interpolate_1d(arr: np.ndarray) -> np.ndarray:
 def main():
     current_path = Path(__file__)
     parent_path = current_path.parents[1]
-    saved_folder = str(parent_path) + "\\results\\saved_pulse-band\\"
-    saved_subfolder = str(saved_folder) + "subject1-ubfc1-30s-all-roi\\"
     sampling_rate = 30
     bandpath_width = [0.75, 4.0]
-    start_time = 5
-    time = 30
+    start_time = 0
+    time = 60
     frame_num = sampling_rate * time
-
     input_folder = select_folder()
     input_image_paths = get_sorted_image_files(input_folder, frame_num)
-
+    saved_dir_name = input_folder +"results\\"
+    saved_subfolder = str(saved_dir_name) + "subject1-left\\"
+    # =========================
+    # 追加: モード切り替え
+    #   "auto"   -> FaceDetector+Param.list_roi_name による自動ROI
+    #   "manual" -> select_roi（cv2.selectROIs）で手動矩形ROIを選択
+    # =========================
+    MODE = "manual"   # "manual" にすると手動選択
     # ========== ROI 準備 ==========
     if MODE == "auto":
         detector = FaceDetector(Param)

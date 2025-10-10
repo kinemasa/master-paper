@@ -271,5 +271,71 @@ class FaceDetector():
                 return img_draw
         
         return img
-        
+    
+    def extract_fixed_RGB(self, img):
+        """
+        MediaPipe FaceMeshを用いて Forehead, Right_Cheek, Left_Cheek の
+        固定サイズROIからRGB平均値を抽出する。
+
+        Parameters
+        ----------
+        img : np.ndarray
+            入力画像（BGR形式）
+
+        Returns
+        -------
+        sig_rgb_fixed : np.ndarray
+            ROIごとのRGB信号。形状 = [3, 3]
+            （行は [Forehead, Right_Cheek, Left_Cheek]、列は [R, G, B]）
+            顔未検出時は np.nan を返す。
+        list_roi_name_fixed : list
+            ['Forehead', 'Right_Cheek', 'Left_Cheek']
+        """
+
+        # MediaPipe FaceMesh
+        mp_face_mesh = mp.solutions.face_mesh
+        face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1)
+
+        rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(rgb_image)
+        if not results.multi_face_landmarks:
+            face_mesh.close()
+            return np.full((3, 3), np.nan), ['Forehead', 'Right_Cheek', 'Left_Cheek']
+
+        lm = results.multi_face_landmarks[0].landmark
+        h, w = img.shape[:2]
+
+        # ランドマーク → 座標変換
+        def to_xy(idx):
+            return int(lm[idx].x * w), int(lm[idx].y * h)
+
+        # ROI定義 (中心ランドマーク, 半幅, 半高さ)
+        roi_defs = {
+            'Forehead': (10, 60, 20),
+            'Right_Cheek': (205, 20, 20),
+            'Left_Cheek': (425, 20, 20),
+        }
+
+        sig_rgb_fixed = np.zeros((3, 3), dtype=float)
+        list_roi_name_fixed = list(roi_defs.keys())
+
+        for i, (name, (idx, hw, hh)) in enumerate(roi_defs.items()):
+            cx, cy = to_xy(idx)
+            x1, y1 = max(0, cx - hw), max(0, cy - hh)
+            x2, y2 = min(w, cx + hw), min(h, cy + hh)
+            roi = img[y1:y2, x1:x2, :]  # BGR
+
+            if roi.size == 0:
+                sig_rgb_fixed[i, :] = np.nan
+                continue
+
+            # ROI内のRGB平均値 (BGR→RGB順に変換)
+            roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+            mean_rgb = np.mean(roi_rgb.reshape(-1, 3), axis=0)
+            sig_rgb_fixed[i, :] = mean_rgb
+
+        face_mesh.close()
+        return sig_rgb_fixed, list_roi_name_fixed
+
+
 

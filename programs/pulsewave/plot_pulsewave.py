@@ -3,7 +3,9 @@ from typing import List, Tuple
 import pandas as pd
 import numpy as np
 import os
-
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pulsewave.processing_pulsewave import normalize_by_envelope
 
 def plot_pulse_wave(pulse_wave,sampling_rate,start_time,time,title,save_path):
     
@@ -41,8 +43,8 @@ def plot_multi_roi_pulsewave(processed_signals_dict, sampling_rate, start_time_s
         if len(s) == 0:
             continue
         # === Min-Max 正規化 (0〜1) ===
+        # s,_ = normalize_by_envelope(s)
         s = (s - s.min()) / (s.max() - s.min() + 1e-8)
-
         # 時間軸（秒）
         t0 = max(0, start_idx) / sampling_rate
         t = np.arange(len(s)) / sampling_rate + t0

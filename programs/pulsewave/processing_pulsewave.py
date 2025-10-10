@@ -308,13 +308,11 @@ def detrend_pulse(pulse, sample_rate):
     
     # デトレンドによりデータ終端は歪みが生じるため，1秒だけ切り捨てる．    
     pulse_length = pulse.shape[0]
-    print(pulse_length)
     pulse = np.concatenate([pulse, pulse[-2 * sample_rate:]])
     virt_length = pulse_length + 2 * sample_rate
     # デトレンド処理 / An Advanced Detrending Method With Application to HRV Analysis
     pulse_dt = np.zeros(virt_length)
     order = len(str(virt_length))
-    print(order)
     lmd = sample_rate * 12 # サンプルレートによって調節するハイパーパラメータ
 
     wdth = sample_rate * 2 # データ終端が歪むため，データを分割してデトレンドする場合，wdth分だけ終端を余分に使用する．
