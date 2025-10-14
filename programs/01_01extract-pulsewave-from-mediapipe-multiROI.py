@@ -6,13 +6,13 @@ import cv2
 import matplotlib.pyplot as plt
 import pandas as pd
 import re
-
+import ctypes
 os.environ["MKL_THREADING_LAYER"] = "GNU"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # ローカルモジュール
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from myutils.select_folder import select_folder
+from myutils.select_folder import select_folder,find_folders,has_images
 from myutils.load_and_save_folder import get_sorted_image_files, save_pulse_to_csv
 from pulsewave.extract_pulsewave import extract_pulsewave
 from pulsewave.processing_pulsewave import (
@@ -20,6 +20,10 @@ from pulsewave.processing_pulsewave import (
 )
 from roiSelector.face_detector import FaceDetector, Param
 
+# --- SetThreadExecutionState flags
+ES_CONTINUOUS       = 0x80000000
+ES_SYSTEM_REQUIRED  = 0x00000001
+ES_DISPLAY_REQUIRED = 0x00000002  # 画面消灯も防ぎたいなら使用
 
 def natural_key(s):
     return [int(text) if text.isdigit() else text.lower()
@@ -54,7 +58,6 @@ def build_index_lookup(names):
             raise ValueError("ROI名が Param.list_roi_name に見つかりません: '{}'".format(n))
         lookup[n] = Param.list_roi_name.index(n)
     return lookup
-
 
 def process_images_folder(
     images_dir,
@@ -146,22 +149,53 @@ def process_images_folder(
             pulse_dict[name]['G'].append(g)
             pulse_dict[name]['B'].append(b)
 
-        # 合成ROI（グループ平均・NaN無視）
         if len(roi_groups) > 0:
-            for gname, member_names in roi_groups.items():
-                member_idx = []
-                for m in member_names:
-                    if m not in Param.list_roi_name:
-                        raise ValueError("[roi_groups] '{}' は Param.list_roi_name に存在しません".format(m))
-                    member_idx.append(Param.list_roi_name.index(m))
+            # まず、現在フレームの「名前→(R,G,B)」辞書を作る
+            rgb_map = {}
 
-                r_mean = safe_mean_ignore_nan(sig_rgb[member_idx, 0], axis=0)
-                g_mean = safe_mean_ignore_nan(sig_rgb[member_idx, 1], axis=0)
-                b_mean = safe_mean_ignore_nan(sig_rgb[member_idx, 2], axis=0)
+            # 従来ROI（Param.list_roi_name）の名前で登録
+            try:
+                base_names = Param.list_roi_name
+                for i, nm in enumerate(base_names):
+                    if i < sig_rgb.shape[0]:
+                        r, g, b = sig_rgb[i, 0], sig_rgb[i, 1], sig_rgb[i, 2]
+                        rgb_map[nm] = (r, g, b)
+            except Exception:
+                pass
+
+            # 固定ROI（extract_fixed_RGB の名前で登録）※ "Forehead", "Left_Cheek", "Right_Cheek" など
+            try:
+                for i, nm in enumerate(roi_names_fixed):
+                    if i < len(sig_rgb_fixed):
+                        r, g, b = sig_rgb_fixed[i]
+                        rgb_map[nm] = (r, g, b)
+            except Exception:
+                pass
+
+            # 各グループについて、名前で探索して平均
+            for gname, member_names in roi_groups.items():
+                r_list, g_list, b_list = [], [], []
+                missing = []
+                for m in member_names:
+                    if m in rgb_map:
+                        r, g, b = rgb_map[m]
+                        r_list.append(r); g_list.append(g); b_list.append(b)
+                    else:
+                        missing.append(m)
+
+                if len(r_list) == 0:
+                    r_mean = np.nan; g_mean = np.nan; b_mean = np.nan
+                else:
+                    r_mean = safe_mean_ignore_nan(np.array(r_list))
+                    g_mean = safe_mean_ignore_nan(np.array(g_list))
+                    b_mean = safe_mean_ignore_nan(np.array(b_list))
 
                 group_pulse_dict[gname]['R'].append(r_mean)
                 group_pulse_dict[gname]['G'].append(g_mean)
                 group_pulse_dict[gname]['B'].append(b_mean)
+
+                if len(missing) > 0:
+                    print(f"[WARN] グループ '{gname}' の一部ROI名が見つかりませんでした: {missing}")
 
     # 共通処理
     def process_and_save_all(method, series_dict):
@@ -194,63 +228,47 @@ def process_images_folder(
         if len(group_pulse_dict) > 0:
             process_and_save_all(method, group_pulse_dict)
 
-
-def has_images(p):
-    IMG_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
-    return any(f.suffix.lower() in IMG_EXT for f in p.iterdir() if f.is_file())
-
-
-def find_images_dirs_under_root(root_dir):
-    """ 親フォルダ直下の subject/trial を探す（trial直下に画像がある想定） """
-    root_dir = Path(root_dir)
-    results = []
-    if not root_dir.exists():
-        return results
-
-    for subject_dir in root_dir.iterdir():
-        if not subject_dir.is_dir():
-            continue
-        for trial_dir in subject_dir.iterdir():
-            if not trial_dir.is_dir():
-                continue
-            if has_images(trial_dir):
-                results.append(trial_dir)
-                print(trial_dir)
-
-    results = sorted(results, key=lambda p: natural_key(p.name))
-    return results
-
-
 def main():
-    sampling_rate = 90
-    bandpass = (0.75, 2.0)
+     # --- スリープ防止を有効化（画面消灯も防ぎたい場合は DISPLAY_REQUIRED も）
+    ok = ctypes.windll.kernel32.SetThreadExecutionState(
+        ES_CONTINUOUS | ES_SYSTEM_REQUIRED  | ES_DISPLAY_REQUIRED
+    )
+    
+    if ok == 0:
+        print("⚠ スリープ防止の設定に失敗しました（権限/ポリシーの可能性）")
+        
+    sampling_rate = 30
+    bandpass = (0.75, 3.0)
     total_time_sec = 60
-    methods = ("GREEN", "CHROM", "LGI", "ICA", "POS", "Hemo","Robust")
-
+    methods = ("GREEN", "CHROM", "LGI", "ICA", "POS", "Hemo")
+    Batch = False  # True = 複数一括 / False = 単体処理
     # 出力フォルダ名（被験者/trial配下に作成）
-    output_dir_name = "rPPG-pulse4"
+    output_dir_name = "rPPG-pulse"
 
     # ▼ 合成したい例（必要に応じて編集）
     roi_groups = {
-        "glabella_and_cheeks": ["glabella", "left malar", "right malar"],
-    #     "both_cheeks": ["left malar", "right malar"],
-    #     "hitai": ["medial forehead", "left lower lateral forehead", "right lower lateral forehead","glabella"],
-    #     "cheaks" :["left ala", "right ala","left lower cheek", "right lower cheek"]
+        "glabella_and_malars": ["glabella", "left malar", "right malar"],
+        "fixed-all": ["Forehead", "Left_Cheek", "Right_Cheek"],
+        "fixed-Forehead":["Forehead"],
+        "fixed-Left-Cheek":["Left_Cheek"],
+        "fixed-Right-Cheek":["Right_Cheek"],
+        "hitai": ["medial forehead", "left lower lateral forehead", "right lower lateral forehead", "glabella"],
+        "malars": ["left malar", "right malar"]
     }
-# 'medial forehead', 'left lower lateral forehead', 'right lower lateral forehead',
-#         'glabella', 'upper nasal dorsum', 'lower nasal dorsum', 'soft triangle',
-#         'left ala', 'right ala', 'nasal tip', 'left lower nasal sidewall', 'right lower nasal sidewall',
-#         'left mid nasal sidewall', 'right mid nasal sidewall', 'philtrum', 'left upper lip',
-#         'right upper lip', 'left nasolabial fold', 'right nasolabial fold', 'left temporal',
-#         'right temporal', 'left malar', 'right malar', 'left lower cheek', 'right lower cheek',
-#         'chin', 'left marionette fold', 'right marionette fold'
-    # ▼ 個別ROIも同時に処理（必要なら調整）
-    # target_roi_names = [
-    #     "glabella","left malar","right malar"]
-    target_roi_names = [
-        "glabella"]
 
-    Batch = False  # True = 複数一括 / False = 単体処理
+    # target_roi_names = ['medial forehead', 'left lower lateral forehead', 'right lower lateral forehead',
+    #     'glabella', 'upper nasal dorsum', 'lower nasal dorsum', 'soft triangle',
+    #     'left ala', 'right ala', 'nasal tip', 'left lower nasal sidewall', 'right lower nasal sidewall',
+    #     'left mid nasal sidewall', 'right mid nasal sidewall', 'philtrum', 'left upper lip',
+    #     'right upper lip', 'left nasolabial fold', 'right nasolabial fold', 'left temporal',
+    #     'right temporal', 'left malar', 'right malar', 'left lower cheek', 'right lower cheek',
+    #     'chin', 'left marionette fold', 'right marionette fold']
+    
+    target_roi_names = ['medial forehead', 'left lower lateral forehead', 'right lower lateral forehead',
+        'glabella', 'left malar', 'right malar', 'left lower cheek', 'right lower cheek',
+        'chin']
+
+
 
     if not Batch:
         images_dir = select_folder("処理する images フォルダを選択してください（例：D:\\subject-name\\images）")
@@ -273,9 +291,13 @@ def main():
         if not root_dir:
             print("[INFO] 親フォルダが選択されませんでした。")
             return
-        images_dirs = find_images_dirs_under_root(Path(root_dir))
-        print("[INFO] 検出した images フォルダ数: {}".format(len(images_dirs)))
 
+        # 「フォルダ名に images を含む」候補を再帰探索し、実際に画像が入っているものだけ採用
+        candidates = find_folders(Path(root_dir), include_keywords=["images"], recursive=True)
+        images_dirs = [p for p in candidates if has_images(p)]
+        images_dirs = sorted(images_dirs, key=lambda p: natural_key(p.name))
+
+        print("[INFO] 検出した images フォルダ数: {}".format(len(images_dirs)))
         for images_dir in images_dirs:
             try:
                 process_images_folder(
@@ -291,7 +313,9 @@ def main():
                 )
             except Exception as e:
                 print("[ERROR] {} の処理でエラー: {}".format(images_dir, e))
-
+                
+                
+    ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
     print("\n=== 全処理完了 ===")
 
 

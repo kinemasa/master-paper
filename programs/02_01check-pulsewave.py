@@ -16,14 +16,14 @@ from pulsewave.processing_pulsewave import normalize_by_envelope
 # ====== ユーザー設定 ======
 SELECT_FILES   = 2
 sample_rate    = 30
-start_time_sec = 1
+start_time_sec = 2
 duration_sec   = 5
 title          = "Selected ROI pulsewaves"
 
 # 正規化の方法: "minmax" / "zscore" / "envelope" / "none"
 NORM_METHOD    = "none"
 # True にすると全ファイルでの最小値・最大値を共通にして [0,1] 正規化（比較時に便利）
-GLOBAL_MINMAX  = True
+GLOBAL_MINMAX  = False
 
 def roi_label_from_parent(csv_path: Path) -> str:
     method_folder = csv_path.parents[1].name

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import mediapipe as mp
 
+
 class Param():
     max_num_faces= 1  # Number of target faces.
     minDetectionCon= 2.0e-1  # Detection confidence
@@ -91,10 +92,17 @@ class FaceDetector():
         self.faceDetection = self.mpFaceDetection.FaceDetection(self.minDetectionCon)  # Face detection.
         self.mpDraw = mp.solutions.drawing_utils  # Drawing utils.
         self.faceMesh = mp.solutions.face_mesh.FaceMesh(
-            max_num_faces=Params.max_num_faces,
+            max_num_faces=1,
             min_detection_confidence=self.minDetectionCon,
             min_tracking_confidence=self.minTrackingCon
-            )  # Face mesh.
+            )  
+        self.faceMesh_fixed = mp.solutions.face_mesh.FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        min_detection_confidence=self.minDetectionCon,
+        min_tracking_confidence=self.minTrackingCon
+        )
+        # Face mesh.
         # ROI params.
         # The list containing sequence numbers of selected keypoints of different ROIs. Size = [num_roi].
         self.list_roi_num = np.array(Params.list_roi_num, dtype=object)
@@ -276,44 +284,29 @@ class FaceDetector():
         """
         MediaPipe FaceMeshを用いて Forehead, Right_Cheek, Left_Cheek の
         固定サイズROIからRGB平均値を抽出する。
-
-        Parameters
-        ----------
-        img : np.ndarray
-            入力画像（BGR形式）
-
-        Returns
-        -------
-        sig_rgb_fixed : np.ndarray
-            ROIごとのRGB信号。形状 = [3, 3]
-            （行は [Forehead, Right_Cheek, Left_Cheek]、列は [R, G, B]）
-            顔未検出時は np.nan を返す。
-        list_roi_name_fixed : list
-            ['Forehead', 'Right_Cheek', 'Left_Cheek']
         """
-
-        # MediaPipe FaceMesh
-        mp_face_mesh = mp.solutions.face_mesh
-        face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1)
-
+        # 既存の self.faceMesh_fixed を使う
         rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
+
+        # まれにstderrに出る雑音を完全ミュートしたい場合は下2行のwithを有効化
+        # import contextlib, sys
+        # with contextlib.redirect_stderr(open(os.devnull, 'w')):
+        results = self.faceMesh_fixed.process(rgb_image)
+
         if not results.multi_face_landmarks:
-            face_mesh.close()
             return np.full((3, 3), np.nan), ['Forehead', 'Right_Cheek', 'Left_Cheek']
 
         lm = results.multi_face_landmarks[0].landmark
         h, w = img.shape[:2]
 
-        # ランドマーク → 座標変換
         def to_xy(idx):
             return int(lm[idx].x * w), int(lm[idx].y * h)
 
         # ROI定義 (中心ランドマーク, 半幅, 半高さ)
         roi_defs = {
-            'Forehead': (10, 60, 20),
-            'Right_Cheek': (205, 20, 20),
-            'Left_Cheek': (425, 20, 20),
+            'Forehead':     (10,  30, 10),
+            'Right_Cheek':  (205, 10, 10),
+            'Left_Cheek':   (425, 10, 10),
         }
 
         sig_rgb_fixed = np.zeros((3, 3), dtype=float)
@@ -329,13 +322,60 @@ class FaceDetector():
                 sig_rgb_fixed[i, :] = np.nan
                 continue
 
-            # ROI内のRGB平均値 (BGR→RGB順に変換)
             roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
             mean_rgb = np.mean(roi_rgb.reshape(-1, 3), axis=0)
             sig_rgb_fixed[i, :] = mean_rgb
 
-        face_mesh.close()
         return sig_rgb_fixed, list_roi_name_fixed
+    
+    # 追加：FaceDetector クラス内のどこか（例えば extract_fixed_RGB の下）に追記
+    def get_roi_polygon_from_landmarks(self, loc_landmark, roi_name):
+        """
+        landmarks(画素座標)と ROI名から、そのROIの多角形座標(Nx2,int)を返す
+        """
+        if roi_name not in self.list_roi_name:
+            return None
+        idx = np.where(self.list_roi_name == roi_name)[0][0]
+        pts = loc_landmark[self.list_roi_num[idx], :2].astype(np.int32)
+        return pts
+
+    def get_fixed_roi_boxes(self, img):
+        """
+        extract_fixed_RGB と同じ定義で固定 ROI の矩形(x1,y1,x2,y2)を返す
+        """
+        rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        results = self.faceMesh_fixed.process(rgb_image)
+        if not results.multi_face_landmarks:
+            return {'Forehead': None, 'Right_Cheek': None, 'Left_Cheek': None}
+
+        lm = results.multi_face_landmarks[0].landmark
+        h, w = img.shape[:2]
+
+        def to_xy(idx):
+            return int(lm[idx].x * w), int(lm[idx].y * h)
+
+        roi_defs = {
+            'Forehead':     (10,  30, 10),
+            'Right_Cheek':  (205, 10, 10),
+            'Left_Cheek':   (425, 10, 10),
+        }
+        boxes = {}
+        for name, (idx, hw, hh) in roi_defs.items():
+            cx, cy = to_xy(idx)
+            x1, y1 = max(0, cx - hw), max(0, cy - hh)
+            x2, y2 = min(w, cx + hw), min(h, cy + hh)
+            if x2 <= x1 or y2 <= y1:
+                boxes[name] = None
+            else:
+                boxes[name] = (x1, y1, x2, y2)
+        return boxes
+
+
+    
+    
+    
+    
+    
 
 
 

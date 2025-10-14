@@ -96,8 +96,8 @@ def main():
     pt_radius = 1
 
     # ROIサイズ（半幅/半高）
-    forehead_half_w, forehead_half_h = 60, 20
-    cheek_half = 20
+    forehead_half_w, forehead_half_h = 30, 10
+    cheek_half = 10
 
     # CSV用
     rows = []

@@ -137,52 +137,44 @@ def method_lgi(X):
     Y = P @ X                           # (N,3,T)
     return Y[:, 1, :].astype(np.float32)  # 第2成分（G側）
 
-def method_lgi2(X):
-    """LGI: 入力 (N,3,T) → 出力 (N,T)"""
-    U, _, _ = np.linalg.svd(X)          # batched SVD
-    S = U[:, :, 0][:, :, None]          # (N,3,1)
-    P = np.tile(np.eye(3, dtype=np.float32), (X.shape[0],1,1)) - S @ np.swapaxes(S,1,2)
-    Y = P @ X                           # (N,3,T)
-    
-    U, _, _ = np.linalg.svd(Y)          # batched SVD
-    S = U[:, :, 0][:, :, None]          # (N,3,1)
-    P = np.tile(np.eye(3, dtype=np.float32), (Y.shape[0],1,1)) - S @ np.swapaxes(S,1,2)
-    Y2 = P @Y
-    return Y2[:, 1, :].astype(np.float32)  # 第2成分（G側）
+# def cpu_LGI(signal):
+#     """
+#     LGI method on CPU using Numpy.
+
+#     Pilz, C. S., Zaunseder, S., Krajewski, J., & Blazek, V. (2018). Local group invariance for heart rate estimation from face videos in the wild. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops (pp. 1254-1262).
+#     """
+#     X = signal
+#     U, _, _ = np.linalg.svd(X)
+#     S = U[:, :, 0]
+#     S = np.expand_dims(S, 2)
+#     sst = np.matmul(S, np.swapaxes(S, 1, 2))
+#     p = np.tile(np.identity(3), (S.shape[0], 1, 1))
+#     P = p - sst
+#     Y = np.matmul(P, X)
+#     bvp = Y[:, 1, :]
+#     return bvp.astype(np.float32) 
 
 def cpu_LGI(signal):
     """
     LGI method on CPU using Numpy.
 
-    Pilz, C. S., Zaunseder, S., Krajewski, J., & Blazek, V. (2018). Local group invariance for heart rate estimation from face videos in the wild. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops (pp. 1254-1262).
+    signal: shape (T, 3, G)  # T: time, 3: RGB, G: local groups
     """
-    X = signal
-    U, _, _ = np.linalg.svd(X)
-    S = U[:, :, 0]
-    S = np.expand_dims(S, 2)
-    sst = np.matmul(S, np.swapaxes(S, 1, 2))
-    p = np.tile(np.identity(3), (S.shape[0], 1, 1))
-    P = p - sst
-    Y = np.matmul(P, X)
-    bvp = Y[:, 1, :]
-    return bvp.astype(np.float32) 
+    X = signal  # (T, 3, G)
 
-def cpu_LGI(signal):
-    """
-    LGI method on CPU using Numpy.
+    # 照明の支配方向 s を各時刻ごとに推定して直交射影（P = I - s s^T）
+    U, _, _ = np.linalg.svd(X, full_matrices=False)  # batched SVD over (3, G)
+    S = U[:, :, 0:1]                                 # (T, 3, 1) first left-singular vector per time
+    sst = np.matmul(S, np.swapaxes(S, 1, 2))         # (T, 3, 3)
+    P = np.tile(np.eye(3), (S.shape[0], 1, 1)) - sst # (T, 3, 3)
+    Y = np.matmul(P, X)                              # (T, 3, G) 直交射影後
 
-    Pilz, C. S., Zaunseder, S., Krajewski, J., & Blazek, V. (2018). Local group invariance for heart rate estimation from face videos in the wild. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops (pp. 1254-1262).
-    """
-    X = signal
-    U, _, _ = np.linalg.svd(X)
-    S = U[:, :, 0]
-    S = np.expand_dims(S, 2)
-    sst = np.matmul(S, np.swapaxes(S, 1, 2))
-    p = np.tile(np.identity(3), (S.shape[0], 1, 1))
-    P = p - sst
-    Y = np.matmul(P, X)
-    bvp = Y[:, 1, :]
-    return bvp.astype(np.float32) 
+    U2, _, _ = np.linalg.svd(Y, full_matrices=False) # (T, 3, 3)
+    pc1 = U2[:, :, 0:1]                              # (T, 3, 1)
+    proj = np.sum(pc1 * Y, axis=1)                   # (T, G)  各群へのPC1投影
+    bvp = proj.mean(axis=1)                          # (T,)    群平均
+
+    return bvp.astype(np.float32)
 
 
 
@@ -200,9 +192,10 @@ def method_chrom(X: np.ndarray) -> np.ndarray:
     eps = 1e-6
     sX = Xcomp.std(axis=1, keepdims=True)         # (N,1)
     sY = Ycomp.std(axis=1, keepdims=True) + eps   # (N,1)
-    alpha = sX / sY                                # (N,1)
+    alpha = sX / sY                               # (N,1)
 
     bvp = Xcomp - alpha * Ycomp                    # (N,T)
+    bvp = -bvp
     return bvp.astype(np.float32)
 
 def method_pos(X: np.ndarray, fps: float, wlen: int | None = None) -> np.ndarray:
@@ -457,10 +450,11 @@ def method_skinseparation(X, eps=1e-8):
     sf_Tc = np.moveaxis(skin_flat, 1, 2)           # (N,T,3)
     comp = np.einsum('ab,ntb->nta', M_pinv, sf_Tc) # (N,T,2)
     hemo = comp[..., 1]                            # (N,T)
+    # hemo = hemo+0.5
 
     # 必要なら“見た目整形”:
-    # return np.exp(-np.clip(hemo, 0, None))
-    return hemo
+    return np.exp(-np.clip(hemo, 0, None))
+    # return hemo
 
 import numpy as np
 from scipy.signal import butter, filtfilt
