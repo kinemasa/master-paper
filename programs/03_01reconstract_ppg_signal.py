@@ -147,7 +147,6 @@ def find_file_for_subject_fast(
 
     return cand[0]
 
-<<<<<<< HEAD
 # def find_file_for_subject(
 #     folder: Path,
 #     sid: int,
@@ -173,13 +172,6 @@ def find_file_for_subject_fast(
 #     cand = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {s.lower() for s in suffixes}]
 #     if not cand:
 #         return None
-=======
-    # 6) 複数一致時の解決：更新時刻が新しいものを優先
-    if len(cand) > 1 and prefer_latest:
-        cand.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    print(cand)
-    return cand[0] if cand else None
->>>>>>> 168a150edf4734c1a9cef983bca221ccca0bb835
 
 #     # 2) IDタグ（例: "3" / "003" / "1020"）
 #     id_tags = {str(sid)}
