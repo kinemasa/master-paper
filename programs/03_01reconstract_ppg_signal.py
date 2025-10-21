@@ -68,8 +68,26 @@ def find_file_for_subject(folder: Path, sid: int, roi: str, phase: str) -> Optio
     cand = [p for p in cand if sid_tag in p.stem]
     cand = [p for p in cand if roi.lower() in p.stem.lower()]
     cand = [p for p in cand if phase.lower() in p.stem.lower()]
+    print(cand)
     # 最初の一致を返す（複数あるならルールを追加）
     return cand[0] if len(cand) > 0 else None
+
+
+def find_ppg_file(folder: Path, sid: int, phase: str) -> Optional[Path]:
+    """
+    例) 1020_after.csv / 1020_before.csv を探す
+    """
+    return find_file_for_subject(
+        folder=folder,
+        sid=sid,
+        roi=None,                 # PPGはROI無し
+        phase=phase,              # "before" or "after"
+        id_widths=(4,),           # 4桁固定を優先
+        suffixes=(".csv", ".txt"),
+        phase_alias={"before": ["before", "pre"], "after": ["after", "post"]},
+        prefer_latest=True
+    )
+
 
 def windowize(X: np.ndarray, y: np.ndarray, fs: int, win_sec: int, hop_sec: int):
     win = win_sec * fs
@@ -134,7 +152,7 @@ class RppgPpgDataset(Dataset):
             p_chrom = find_file_for_subject(CHROM_dir, sid, roi, phase)
             p_lgi   = find_file_for_subject(LGI_dir,   sid, roi, phase)
             p_omit  = find_file_for_subject(OMIT_dir,sid,roi,phase)
-            p_ppg   = find_file_for_subject(PPG_dir,   sid, roi, phase)
+            p_ppg   =find_ppg_file(PPG_dir,sid,phase)
 
             if not all([p_ica, p_pos, p_chrom, p_lgi, p_ppg]):
                 # 見つからないものがあればスキップ
