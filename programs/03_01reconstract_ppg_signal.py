@@ -21,21 +21,56 @@ from typing import Optional, List, Tuple, Dict, Iterable
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import load_ppg_pulse
-from deep_learning.evaluation import total_loss
+from deep_learning.evaluation import total_loss,weighted_mae,weight_regularizers,weighted_corr_loss
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from pulsewave.processing_pulsewave import detrend_pulse,bandpass_filter_pulse
+import json
+import tkinter as tk
+from tkinter import messagebox
 
+def ask_yes_no(msg: str) -> bool:
+    root = tk.Tk()
+    root.withdraw()
+    return messagebox.askyesno("確認", msg)
 
 _NUM_RE = re.compile(r"(\d+)")  # ファイル名から最初の数字列を拾う
 
 
-_NUM_RE = re.compile(r"(\d+)")  # ファイル名から最初の数字列を拾う
 
-def _pick_folder(label: str) -> Path:
-    p = select_folder(message=f"{label}")
-    if not p:
-        raise RuntimeError(f"{label} のフォルダ選択がキャンセルされました。")
-    return Path(p)
+CONFIG_PATH = Path("./last_folders.json")
+
+def ask_yes_no(msg: str) -> bool:
+    root = tk.Tk()
+    root.withdraw()
+    return messagebox.askyesno("確認", msg)
+
+def _pick_or_load_folders():
+    """
+    前回選んだフォルダを再利用するか尋ねる。
+    再利用ならJSONをロード、新規ならselect_folder()を使って再設定。
+    """
+    folder_labels = ["ICA", "POS", "CHROM", "LGI", "OMIT", "PPG（ROIなし/phase固定）"]
+
+    if CONFIG_PATH.exists() and ask_yes_no("前回と同じフォルダを使用しますか？"):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        print("✅ 前回のフォルダ設定を再利用します。")
+        return {label: Path(saved[label]) for label in folder_labels}
+
+    # 新規選択
+    folders = {}
+    for label in folder_labels:
+        p = select_folder(message=f"{label} フォルダを選択してください")
+        if not p:
+            raise RuntimeError(f"{label} のフォルダ選択がキャンセルされました。")
+        folders[label] = Path(p)
+
+    # 保存
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump({k: str(v) for k, v in folders.items()}, f, ensure_ascii=False, indent=2)
+    print(f"💾 選択したフォルダを保存しました: {CONFIG_PATH}")
+
+    return folders
 
 def _build_index(folder: Path, suffixes: Iterable[str]=(".csv",)) -> Dict[int, Path]:
     """
@@ -59,7 +94,6 @@ def load_pulse(filepath):
     try:
         # 区切り自動判定 (カンマ/タブ/スペース対応)
         df = pd.read_csv(filepath, sep=None, engine="python")
-        print(df)
         # 列名を小文字化して対応
         cols_lower = {c.lower(): c for c in df.columns}
         # if "time_sec" not in cols_lower or "pulse" not in cols_lower:
@@ -190,12 +224,13 @@ class RppgPpgDataset(Dataset):
         self.fs_ppg_src = fs_ppg_src
 
         # ---- 必ずGUIでフォルダ選択 ----
-        ICA_dir   = _pick_folder("ICA")
-        POS_dir   = _pick_folder("POS")
-        CHROM_dir = _pick_folder("CHROM")
-        LGI_dir   = _pick_folder("LGI")
-        OMIT_dir  = _pick_folder("OMIT")
-        PPG_dir   = _pick_folder("PPG（ROIなし/phase固定）")
+        folders = _pick_or_load_folders()
+        ICA_dir   = folders["ICA"]
+        POS_dir   = folders["POS"]
+        CHROM_dir = folders["CHROM"]
+        LGI_dir   = folders["LGI"]
+        OMIT_dir  = folders["OMIT"]
+        PPG_dir   = folders["PPG（ROIなし/phase固定）"]
 
         # ---- インデックス作成（各フォルダ一度だけスキャン）----
         suffixes = (".csv", ".txt") if allow_txt else (".csv",)
@@ -284,7 +319,7 @@ def make_loaders(dataset: RppgPpgDataset, batch_size: int, num_workers: int,
     train_set, val_set, test_set = random_split(dataset, [n_train, n_val, n_test],
                                                 generator=torch.Generator().manual_seed(42))
     dl_train = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                          num_workers=num_workers, pin_memory=True, drop_last=True)
+                          num_workers=num_workers, pin_memory=True, drop_last=False)
     dl_val   = DataLoader(val_set,   batch_size=batch_size, shuffle=False,
                           num_workers=num_workers, pin_memory=True, drop_last=False)
     dl_test  = DataLoader(test_set,  batch_size=batch_size, shuffle=False,
@@ -298,8 +333,8 @@ def train_one_epoch(model, loader, optimizer, device):
         xs = xs.to(device)          # (B,T,C)
         ys = ys.to(device)          # (B,T,1)
         y_hat, w_hat, _ = model(xs) # (B,T,1), (B,T,1)
-        loss = total_loss(y_hat, ys, w_hat, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01)
-
+        # loss = total_loss(y_hat, ys, w_hat, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01)
+        loss = weighted_mae(y_hat, ys,w_hat)
         optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -340,7 +375,7 @@ def main():
     val_ratio   = 0.15
     batch_size  = 32
     num_workers = 2
-    max_epochs  = 30
+    max_epochs  = 200
     lr          = 1e-3
     device      = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -349,9 +384,9 @@ def main():
     dataset = RppgPpgDataset(
     fs=30,            # 学習/推論で使うターゲットFs
     win_sec=10,
-    hop_sec=5,
-    subj_start=1020,     # 任意
-    subj_end=1020,     # 任意
+    hop_sec=10,
+    subj_start=1000,     # 任意
+    subj_end=10000,     # 任意
     omit_ids=[], # 任意
     allow_txt=False,  # .txtも対象なら True
     fs_ppg_src=100,   # 元PPGのFsに合わせて
@@ -364,11 +399,11 @@ def main():
         input_size=5, lstm_dims=(90,60,30), cnn_hidden=32,
         drop=0.2, combine_quality_with_head=False
     ).to(device)
-
     # --- 最適化 ---
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
-
+    print(f"Dataset total: {len(dataset)}")
+    print(f"Train/Val/Test = {len(dl_train.dataset)}, {len(dl_val.dataset)}, {len(dl_test.dataset)}")
     # --- 学習 ---
     best_val = float("inf"); best_state = None
     for epoch in range(1, max_epochs+1):
@@ -395,6 +430,7 @@ def main():
     
     # --- 推定結果を全データで書き出し ---
     out_root = Path("./outputs")
+    fs=30
     export_all_predictions(model, dl_train, device, fs, out_root, "train")
     export_all_predictions(model, dl_val,   device, fs, out_root, "val")
     export_all_predictions(model, dl_test,  device, fs, out_root, "test")
