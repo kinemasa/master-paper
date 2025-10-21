@@ -12,6 +12,9 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from scipy.signal import butter, filtfilt, detrend
 from typing import List, Tuple, Optional
 from scipy.signal import resample_poly
+from pathlib import Path
+from typing import Optional, Iterable
+import os
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import load_pulse,load_ppg_pulse
@@ -54,23 +57,71 @@ def resample_ppg_100_to_30(ppg_signal: np.ndarray) -> np.ndarray:
     y30 = resample_poly(ppg_signal, up=3, down=10, window=('kaiser', 5.0))
     return y30.astype(np.float32)
 
-def find_file_for_subject(folder: Path, sid: int, roi: str, phase: str) -> Optional[Path]:
+def find_file_for_subject(
+    folder: Path,
+    sid: int,
+    roi: Optional[str] = None,             # PPGは None / "" でOK
+    phase: Optional[str] = None,           # "before" / "after" など
+    *,
+    id_widths: Iterable[int] = (3, 4),     # 3桁と4桁の両対応（例: 003 と 1020）
+    suffixes: Iterable[str] = (".csv", ".txt"),
+    phase_alias: Optional[dict] = None,    # {"before": ["before","pre"], "after": ["after","post"]} など
+    prefer_latest: bool = True             # 複数一致時は更新時刻が新しいものを返す
+) -> Optional[Path]:
     """
-    フォルダ内から 被験者ID / ROI / phase を含むファイルを一つ探す。
-    想定: ファイル名のどこかに 3桁ID, roi, before/after が入っている。
-    例) '003-cheek-after.csv', 'sub003_cheek_after.txt' など
+    指定条件にマッチするファイルを1つ返す。見つからなければ None。
+    - IDは可変桁数（id_widths）でゼロ埋めタグも試す
+    - roi/phase は省略可能（PPGのようにROIが無い命名でも可）
+    - phaseはエイリアス（before=pre等）にも対応
     """
-    sid_tag = f"{sid:03d}"
-    cand = list(folder.glob("**/*"))
-    # 拡張子制限（csv/txt）
-    cand = [p for p in cand if p.is_file() and p.suffix.lower() in [".csv", ".txt"]]
-    # 文字列フィルタ
-    cand = [p for p in cand if sid_tag in p.stem]
-    cand = [p for p in cand if roi.lower() in p.stem.lower()]
-    cand = [p for p in cand if phase.lower() in p.stem.lower()]
-    print(cand)
-    # 最初の一致を返す（複数あるならルールを追加）
-    return cand[0] if len(cand) > 0 else None
+    folder = Path(folder)
+    if not folder.exists():
+        return None
+
+    # 1) 候補収集（拡張子フィルタ）
+    cand = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {s.lower() for s in suffixes}]
+    if not cand:
+        return None
+
+    # 2) IDタグ（例: "3" / "003" / "1020"）
+    id_tags = {str(sid)}
+    for w in id_widths:
+        try:
+            id_tags.add(f"{sid:0{w}d}")
+        except Exception:
+            pass
+
+    def name_lower(p: Path) -> str:
+        # stem だけでなくフル名で見たい場合は p.name を使う
+        return p.name.lower()
+
+    # 3) IDフィルタ（いずれかのIDタグを含む）
+    cand = [p for p in cand if any(tag in name_lower(p) for tag in id_tags)]
+    if not cand:
+        return None
+
+    # 4) ROIフィルタ（指定があれば）
+    if roi:
+        roil = roi.lower()
+        cand = [p for p in cand if roil in name_lower(p)]
+        if not cand:
+            return None
+
+    # 5) phaseフィルタ（エイリアス展開込）
+    if phase:
+        ph = phase.lower()
+        toks = {ph}
+        if phase_alias and ph in phase_alias:
+            toks.update(tok.lower() for tok in phase_alias[ph])
+        cand = [p for p in cand if any(tok in name_lower(p) for tok in toks)]
+        if not cand:
+            return None
+
+    # 6) 複数一致時の解決：更新時刻が新しいものを優先
+    if len(cand) > 1 and prefer_latest:
+        cand.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    return cand[0] if cand else None
 
 
 def find_ppg_file(folder: Path, sid: int, phase: str) -> Optional[Path]:
