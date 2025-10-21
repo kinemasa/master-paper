@@ -75,6 +75,12 @@ def weighted_mae(y_hat, y, w, eps=1e-8):
     den = w.sum(dim=1).clamp_min(eps)            # (B,1)
     return (num/den).mean()
 
+def mae(y_hat, y, w, eps=1e-8):
+    w=1
+    num = (w * (y_hat - y).abs()).sum(dim=1)     # (B,1)
+    den = w.sum(dim=1).clamp_min(eps)            # (B,1)
+    return (num/den).mean()
+
 def weighted_corr_loss(y_hat, y, w, eps=1e-8):
     w = w / (w.sum(dim=1, keepdim=True).clamp_min(eps))
     mu_h = (w * y_hat).sum(dim=1, keepdim=True); h0 = y_hat - mu_h

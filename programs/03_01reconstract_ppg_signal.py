@@ -21,7 +21,7 @@ from typing import Optional, List, Tuple, Dict, Iterable
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import load_ppg_pulse
-from deep_learning.evaluation import total_loss,weighted_mae,weight_regularizers,weighted_corr_loss
+from deep_learning.evaluation import total_loss,weighted_mae,mae
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from pulsewave.processing_pulsewave import detrend_pulse,bandpass_filter_pulse
 import json
@@ -108,6 +108,7 @@ def load_pulse(filepath):
     except Exception as e:
         print(f"[load_pulse_csv] 読み込みエラー: {e}")
         return None
+
 
 def preprocess_ppg_signal(ppg_signal: np.ndarray, fs_ppg: int = 100, fs_target: int = 30) -> np.ndarray:
     """
@@ -334,7 +335,7 @@ def train_one_epoch(model, loader, optimizer, device):
         ys = ys.to(device)          # (B,T,1)
         y_hat, w_hat, _ = model(xs) # (B,T,1), (B,T,1)
         # loss = total_loss(y_hat, ys, w_hat, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01)
-        loss = weighted_mae(y_hat, ys,w_hat)
+        loss = mae(y_hat, ys,w_hat)
         optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
