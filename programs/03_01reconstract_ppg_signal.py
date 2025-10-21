@@ -15,6 +15,7 @@ from scipy.signal import resample_poly
 from pathlib import Path
 from typing import Optional, Iterable
 import os
+import glob
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import load_pulse,load_ppg_pulse
@@ -57,33 +58,22 @@ def resample_ppg_100_to_30(ppg_signal: np.ndarray) -> np.ndarray:
     y30 = resample_poly(ppg_signal, up=3, down=10, window=('kaiser', 5.0))
     return y30.astype(np.float32)
 
-def find_file_for_subject(
+def find_file_for_subject_fast(
     folder: Path,
     sid: int,
-    roi: Optional[str] = None,             # PPGは None / "" でOK
-    phase: Optional[str] = None,           # "before" / "after" など
+    roi: Optional[str] = None,
+    phase: Optional[str] = None,
     *,
-    id_widths: Iterable[int] = (3, 4),     # 3桁と4桁の両対応（例: 003 と 1020）
+    id_widths: Iterable[int] = (3, 4),
     suffixes: Iterable[str] = (".csv", ".txt"),
-    phase_alias: Optional[dict] = None,    # {"before": ["before","pre"], "after": ["after","post"]} など
-    prefer_latest: bool = True             # 複数一致時は更新時刻が新しいものを返す
+    phase_alias: Optional[dict] = None,
+    prefer_latest: bool = True,
 ) -> Optional[Path]:
-    """
-    指定条件にマッチするファイルを1つ返す。見つからなければ None。
-    - IDは可変桁数（id_widths）でゼロ埋めタグも試す
-    - roi/phase は省略可能（PPGのようにROIが無い命名でも可）
-    - phaseはエイリアス（before=pre等）にも対応
-    """
     folder = Path(folder)
     if not folder.exists():
         return None
 
-    # 1) 候補収集（拡張子フィルタ）
-    cand = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {s.lower() for s in suffixes}]
-    if not cand:
-        return None
-
-    # 2) IDタグ（例: "3" / "003" / "1020"）
+    # IDタグ群を作成（"3","003","1020"など）
     id_tags = {str(sid)}
     for w in id_widths:
         try:
@@ -91,49 +81,143 @@ def find_file_for_subject(
         except Exception:
             pass
 
-    def name_lower(p: Path) -> str:
-        # stem だけでなくフル名で見たい場合は p.name を使う
-        return p.name.lower()
+    # phaseトークン群（エイリアス展開）
+    phase_tokens = set()
+    if phase:
+        p = phase.lower()
+        phase_tokens.add(p)
+        if phase_alias and p in phase_alias:
+            phase_tokens.update(tok.lower() for tok in phase_alias[p])
 
-    # 3) IDフィルタ（いずれかのIDタグを含む）
-    cand = [p for p in cand if any(tag in name_lower(p) for tag in id_tags)]
+    # 検索パターンを組み立て（ID×ROI×phase×拡張子 の直積）
+    # 例: **/*003*cheek*before*.csv
+    patterns = []
+    for ext in suffixes:
+        for tag in id_tags:
+            if roi and phase_tokens:
+                for ph in phase_tokens:
+                    patterns.append(str(folder / f"**/*{tag}*{roi}*{ph}*{ext}"))
+            elif roi:
+                patterns.append(str(folder / f"**/*{tag}*{roi}*{ext}"))
+            elif phase_tokens:
+                for ph in phase_tokens:
+                    patterns.append(str(folder / f"**/*{tag}*{ph}*{ext}"))
+            else:
+                patterns.append(str(folder / f"**/*{tag}*{ext}"))
+
+    # パターンごとにヒット収集（recursive=True）
+    cand = []
+    for pat in patterns:
+        cand.extend(glob.glob(pat, recursive=True))
+
+    # 正規化 & 下流の最終チェック
+    cand = [Path(p) for p in set(cand)]  # 重複を削除
+    if roi:
+        roil = roi.lower()
+        cand = [p for p in cand if roil in p.name.lower()]
+    if phase_tokens:
+        cand = [p for p in cand if any(ph in p.name.lower() for ph in phase_tokens)]
     if not cand:
         return None
 
-    # 4) ROIフィルタ（指定があれば）
-    if roi:
-        roil = roi.lower()
-        cand = [p for p in cand if roil in name_lower(p)]
-        if not cand:
-            return None
+    # prefer_latest=True なら最大mtimeだけを見る（ソートしない）
+    if prefer_latest and len(cand) > 1:
+        return max(cand, key=lambda p: p.stat().st_mtime)
 
-    # 5) phaseフィルタ（エイリアス展開込）
-    if phase:
-        ph = phase.lower()
-        toks = {ph}
-        if phase_alias and ph in phase_alias:
-            toks.update(tok.lower() for tok in phase_alias[ph])
-        cand = [p for p in cand if any(tok in name_lower(p) for tok in toks)]
-        if not cand:
-            return None
+    return cand[0]
 
-    # 6) 複数一致時の解決：更新時刻が新しいものを優先
-    if len(cand) > 1 and prefer_latest:
-        cand.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+# def find_file_for_subject(
+#     folder: Path,
+#     sid: int,
+#     roi: Optional[str] = None,             # PPGは None / "" でOK
+#     phase: Optional[str] = None,           # "before" / "after" など
+#     *,
+#     id_widths: Iterable[int] = (3, 4),     # 3桁と4桁の両対応（例: 003 と 1020）
+#     suffixes: Iterable[str] = (".csv", ".txt"),
+#     phase_alias: Optional[dict] = None,    # {"before": ["before","pre"], "after": ["after","post"]} など
+#     prefer_latest: bool = True             # 複数一致時は更新時刻が新しいものを返す
+# ) -> Optional[Path]:
+#     """
+#     指定条件にマッチするファイルを1つ返す。見つからなければ None。
+#     - IDは可変桁数（id_widths）でゼロ埋めタグも試す
+#     - roi/phase は省略可能（PPGのようにROIが無い命名でも可）
+#     - phaseはエイリアス（before=pre等）にも対応
+#     """
+#     folder = Path(folder)
+#     if not folder.exists():
+#         return None
 
-    return cand[0] if cand else None
+#     # 1) 候補収集（拡張子フィルタ）
+#     cand = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {s.lower() for s in suffixes}]
+#     if not cand:
+#         return None
 
+#     # 2) IDタグ（例: "3" / "003" / "1020"）
+#     id_tags = {str(sid)}
+#     for w in id_widths:
+#         try:
+#             id_tags.add(f"{sid:0{w}d}")
+#         except Exception:
+#             pass
+
+#     def name_lower(p: Path) -> str:
+#         # stem だけでなくフル名で見たい場合は p.name を使う
+#         return p.name.lower()
+
+#     # 3) IDフィルタ（いずれかのIDタグを含む）
+#     cand = [p for p in cand if any(tag in name_lower(p) for tag in id_tags)]
+#     if not cand:
+#         return None
+
+#     # 4) ROIフィルタ（指定があれば）
+#     if roi:
+#         roil = roi.lower()
+#         cand = [p for p in cand if roil in name_lower(p)]
+#         if not cand:
+#             return None
+
+#     # 5) phaseフィルタ（エイリアス展開込）
+#     if phase:
+#         ph = phase.lower()
+#         toks = {ph}
+#         if phase_alias and ph in phase_alias:
+#             toks.update(tok.lower() for tok in phase_alias[ph])
+#         cand = [p for p in cand if any(tok in name_lower(p) for tok in toks)]
+#         if not cand:
+#             return None
+
+#     # 6) 複数一致時の解決：更新時刻が新しいものを優先
+#     if len(cand) > 1 and prefer_latest:
+#         cand.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+#     return cand[0] if cand else None
+
+
+# def find_ppg_file(folder: Path, sid: int, phase: str) -> Optional[Path]:
+#     """
+#     例) 1020_after.csv / 1020_before.csv を探す
+#     """
+#     return find_file_for_subject(
+#         folder=folder,
+#         sid=sid,
+#         roi=None,                 # PPGはROI無し
+#         phase=phase,              # "before" or "after"
+#         id_widths=(4,),           # 4桁固定を優先
+#         suffixes=(".csv", ".txt"),
+#         phase_alias={"before": ["before", "pre"], "after": ["after", "post"]},
+#         prefer_latest=True
+#     )
 
 def find_ppg_file(folder: Path, sid: int, phase: str) -> Optional[Path]:
     """
     例) 1020_after.csv / 1020_before.csv を探す
     """
-    return find_file_for_subject(
+    return find_file_for_subject_fast(   # ← fast版に変更！
         folder=folder,
         sid=sid,
         roi=None,                 # PPGはROI無し
         phase=phase,              # "before" or "after"
-        id_widths=(4,),           # 4桁固定を優先
+        id_widths=(4,),           # 4桁固定
         suffixes=(".csv", ".txt"),
         phase_alias={"before": ["before", "pre"], "after": ["after", "post"]},
         prefer_latest=True
