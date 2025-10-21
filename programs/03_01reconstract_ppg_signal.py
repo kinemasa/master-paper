@@ -17,6 +17,7 @@ from typing import Optional, Iterable
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import glob
+import datetime
 from typing import Optional, List, Tuple, Dict, Iterable
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
@@ -27,7 +28,7 @@ from pulsewave.processing_pulsewave import detrend_pulse,bandpass_filter_pulse
 import json
 import tkinter as tk
 from tkinter import messagebox
-
+import csv
 def ask_yes_no(msg: str) -> bool:
     root = tk.Tk()
     root.withdraw()
@@ -364,6 +365,17 @@ def main():
     # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000002)
     
+      # ログCSVの準備（Excelで開きやすいようにUTF-8 BOM付き）
+    out_root = Path("./outputs")
+    out_root.mkdir(parents=True, exist_ok=True)
+    hist_csv = out_root / "training_log.csv"
+
+    # 初回ヘッダ（既に存在していても再作成したい場合は unlink してね）
+    if not hist_csv.exists():
+        with open(hist_csv, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp", "epoch", "train_loss", "val_loss", "lr"])
+    
     # ICA_folder = select_folder(message="ICA")
     # POS_folder = select_folder(message="POS")
     # CHROM_folder = select_folder(message="CHROM")
@@ -412,6 +424,12 @@ def main():
         va = evaluate(model, dl_val, device)
         scheduler.step(va)
         print(f"[{epoch:03d}] train={tr:.4f}  val={va:.4f}  lr={optimizer.param_groups[0]['lr']:.2e}")
+        
+        # ← ここでCSVに1行追記
+        with open(hist_csv, "a", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([datetime.now().isoformat(timespec="seconds"), epoch, f"{tr:.6f}", f"{va:.6f}", f"{cur_lr:.6e}"])
+
 
         if va < best_val:
             best_val = va
