@@ -18,10 +18,31 @@ import os
 import glob
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
-from myutils.load_and_save_folder import load_pulse,load_ppg_pulse
+from myutils.load_and_save_folder import load_ppg_pulse
 from deep_learning.evaluation import total_loss
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from pulsewave.processing_pulsewave import detrend_pulse,bandpass_filter_pulse
+
+def load_pulse(filepath):
+    """time_sec, pulse を持つCSV/TXTを読み込んでDataFrameを返す"""
+    try:
+        # 区切り自動判定 (カンマ/タブ/スペース対応)
+        df = pd.read_csv(filepath, sep=None, engine="python")
+        print(df)
+        # 列名を小文字化して対応
+        cols_lower = {c.lower(): c for c in df.columns}
+        # if "time_sec" not in cols_lower or "pulse" not in cols_lower:
+        #     raise ValueError(f"'time_sec' または 'pulse' 列が見つかりません: {df.columns}")
+
+        # 数値化（文字混入はエラーにする）
+        df["time_sec"] = pd.to_numeric(df[cols_lower["time_sec"]], errors="raise")
+        df["value"] = pd.to_numeric(df[cols_lower["value"]], errors="raise")
+
+        return df
+
+    except Exception as e:
+        print(f"[load_pulse_csv] 読み込みエラー: {e}")
+        return None
 
 def preprocess_ppg_signal(ppg_signal: np.ndarray, fs_ppg: int = 100, fs_target: int = 30) -> np.ndarray:
     """
@@ -126,6 +147,7 @@ def find_file_for_subject_fast(
 
     return cand[0]
 
+<<<<<<< HEAD
 # def find_file_for_subject(
 #     folder: Path,
 #     sid: int,
@@ -151,6 +173,13 @@ def find_file_for_subject_fast(
 #     cand = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {s.lower() for s in suffixes}]
 #     if not cand:
 #         return None
+=======
+    # 6) 複数一致時の解決：更新時刻が新しいものを優先
+    if len(cand) > 1 and prefer_latest:
+        cand.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    print(cand)
+    return cand[0] if cand else None
+>>>>>>> 168a150edf4734c1a9cef983bca221ccca0bb835
 
 #     # 2) IDタグ（例: "3" / "003" / "1020"）
 #     id_tags = {str(sid)}
@@ -289,7 +318,7 @@ class RppgPpgDataset(Dataset):
             p_omit  = find_file_for_subject(OMIT_dir,sid,roi,phase)
             p_ppg   =find_ppg_file(PPG_dir,sid,phase)
 
-            if not all([p_ica, p_pos, p_chrom, p_lgi, p_ppg]):
+            if not all([p_ica, p_pos, p_chrom, p_lgi,p_omit, p_ppg]):
                 # 見つからないものがあればスキップ
                 continue
 
@@ -301,16 +330,16 @@ class RppgPpgDataset(Dataset):
             df_omit = load_pulse(p_omit)
             df_ppg   = load_ppg_pulse(p_ppg)  # PPGは別関数とのこと
 
-            if any(d is None for d in [df_ica, df_pos, df_chrom, df_lgi, df_ppg]):
+            if any(d is None for d in [df_ica, df_pos, df_chrom, df_lgi,df_omit, df_ppg]):
                 continue
 
             # numpy化
-            s_ica   = df_ica["pulse"].to_numpy(dtype=float)
-            s_pos   = df_pos["pulse"].to_numpy(dtype=float)
-            s_chrom = df_chrom["pulse"].to_numpy(dtype=float)
-            s_lgi   = df_lgi["pulse"].to_numpy(dtype=float)
-            s_omit  =df_omit["pulse"].to_numpy(dtype=float)
-            s_ppg   = df_ppg["pulse"].to_numpy(dtype=float)
+            s_ica   = df_ica["value"].to_numpy(dtype=float)
+            s_pos   = df_pos["value"].to_numpy(dtype=float)
+            s_chrom = df_chrom["value"].to_numpy(dtype=float)
+            s_lgi   = df_lgi["value"].to_numpy(dtype=float)
+            s_omit  =df_omit["value"].to_numpy(dtype=float)
+            s_ppg   = df_ppg["value"].to_numpy(dtype=float)
             
             # ★ PPGだけリサンプリング＆デトレンド＆バンドパス
             s_ppg = preprocess_ppg_signal(s_ppg, fs_ppg=100, fs_target=30)
@@ -323,6 +352,7 @@ class RppgPpgDataset(Dataset):
             y = s_ppg                                            # (T,)
 
             self.samples.extend(windowize(X, y, fs, win_sec, hop_sec))
+            print(self.samples)
 
         if len(self.samples) == 0:
             raise RuntimeError("サンプルが見つかりません。ファイル名に ROI / phase / 3桁ID が含まれているか確認してください。")
@@ -401,7 +431,7 @@ def main():
     roi       = "glabella"     # ← 必要に応じて変更
     phase     = "after"     # ← "before" / "after"
     subj_min  = 1020
-    subj_max  = 1100
+    subj_max  = 1020
 
     train_ratio = 0.7
     val_ratio   = 0.15
