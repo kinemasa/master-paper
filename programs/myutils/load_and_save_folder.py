@@ -79,14 +79,14 @@ def load_ppg_pulse(filepath):
             raise ValueError(f"'timestamp' 列が見つかりません: {df.columns}")
 
         if "value" in cols_lower:
-            df["pulse"] = df[cols_lower["value"]]
+            df["value"] = df[cols_lower["value"]]
         elif "pulse" in cols_lower:
-            df["pulse"] = df[cols_lower["pulse"]]
+            df["value"] = df[cols_lower["pulse"]]
         else:
             raise ValueError(f"'value' 列が見つかりません: {df.columns}")
 
         # 数値化できる部分は変換（文字列時間は残す）
-        df["pulse"] = pd.to_numeric(df["pulse"], errors="raise")
+        df["value"] = pd.to_numeric(df["value"], errors="raise")
 
         # timestamp が "18:09.9" などの場合は文字列でそのまま保持
         # → 必要に応じて秒数に変換する例:
@@ -97,7 +97,7 @@ def load_ppg_pulse(filepath):
                 pass  # 変換できない場合はそのまま
 
         # 必要な列だけ残す
-        df = df[["time_sec", "pulse"]]
+        df = df[["time_sec", "value"]]
 
         return df
 
