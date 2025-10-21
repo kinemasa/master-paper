@@ -12,10 +12,10 @@ from pulsewave.plot_pulsewave import plot_multi_roi_pulsewave
 from pulsewave.processing_pulsewave import normalize_by_envelope
 
 # ====== ユーザー設定 ======
-SELECT_FILES   = 4
-FS_LIST        = [30,30,30,100]   # ← ファイル1, ファイル2 のサンプリングレートをここで明記！
-TARGET_FS      = 100          # ← 共通の比較用サンプリングレート
-start_time_sec = 5
+SELECT_FILES   = 2
+FS_LIST        = [30,100]   # ← ファイル1, ファイル2 のサンプリングレートをここで明記！
+TARGET_FS      = 30          # ← 共通の比較用サンプリングレート
+start_time_sec = 2
 duration_sec   = 5
 title          = "Signal comparison (different sampling rates)"
 

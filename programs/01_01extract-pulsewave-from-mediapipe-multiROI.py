@@ -92,10 +92,10 @@ def process_images_folder(
     subject_dir = images_dir
     saved_folder = subject_dir / output_dir_name
 
-    if saved_folder.exists():
-        print("[SKIP] {} は既に '{}' が存在するためスキップします。".format(subject_dir.name, output_dir_name))
-        return
-    saved_folder.mkdir(exist_ok=True, parents=True)
+    # if saved_folder.exists():
+    #     print("[SKIP] {} は既に '{}' が存在するためスキップします。".format(subject_dir.name, output_dir_name))
+    #     return
+    # saved_folder.mkdir(exist_ok=True, parents=True)
 
     detector = FaceDetector(Param)
     print("\n=== Processing subject: {} ===".format(subject_dir.name))
@@ -219,7 +219,6 @@ def process_images_folder(
                 save_pulse_to_csv(detrend_p, roi_subdir / "detrend_pulse.csv", sampling_rate)
                 save_pulse_to_csv(bandpass_p, roi_subdir / "bandpass_pulse.csv", sampling_rate)
                 save_pulse_to_csv(sg_p, roi_subdir / "sgfilter_pulse.csv", sampling_rate)
-                save_pulse_to_csv(normalized_p, roi_subdir / "normalized_by_envelope.csv", sampling_rate)
 
     for method in methods:
         print("  - Method: {}".format(method))
@@ -240,8 +239,9 @@ def main():
     sampling_rate = 30
     bandpass = (0.75, 3.0)
     total_time_sec = 60
-    methods = ("GREEN", "CHROM", "LGI", "ICA", "POS", "Hemo")
-    Batch = False  # True = 複数一括 / False = 単体処理
+    # methods = ("GREEN", "CHROM", "LGI", "ICA", "POS", "Hemo")
+    methods = ("OMIT",)
+    Batch = True  # True = 複数一括 / False = 単体処理
     # 出力フォルダ名（被験者/trial配下に作成）
     output_dir_name = "rPPG-pulse"
 

@@ -405,8 +405,9 @@ def main():
     sampling_rate = 30
     bandpass = (0.75, 3.0)
     total_time_sec = 60
-    methods = ("GREEN", "CHROM", "LGI", "ICA", "POS", "Hemo")
-    Batch = False  # True = 複数一括 / False = 単体処理
+    # methods = ("GREEN", "CHROM", "LGI", "ICA", "POS", "Hemo")
+    methods = ("OMIT",)
+    Batch = True  # True = 複数一括 / False = 単体処理
     # 出力フォルダ名（被験者/trial配下に作成）
     output_dir_name = "rPPG-pulse"
 

@@ -115,9 +115,9 @@ def extract_pulsewave(pulse_dict,fps,method="GREEN",roi_order=None,fill_nan=True
         
         bvp = method_skinseparation(X)
         
-    elif method == "Robust":
+    elif method == "OMIT":
         # 照明＋動きロバスト版（重みなしLGI + 濃度変換）
-        bvp,_ = robust_rppg_equal_per_roi(X, fps)
+        bvp =method_omit(X)
         
     return bvp, used_roi_order
 
@@ -153,28 +153,6 @@ def method_lgi(X):
 #     Y = np.matmul(P, X)
 #     bvp = Y[:, 1, :]
 #     return bvp.astype(np.float32) 
-
-def cpu_LGI(signal):
-    """
-    LGI method on CPU using Numpy.
-
-    signal: shape (T, 3, G)  # T: time, 3: RGB, G: local groups
-    """
-    X = signal  # (T, 3, G)
-
-    # 照明の支配方向 s を各時刻ごとに推定して直交射影（P = I - s s^T）
-    U, _, _ = np.linalg.svd(X, full_matrices=False)  # batched SVD over (3, G)
-    S = U[:, :, 0:1]                                 # (T, 3, 1) first left-singular vector per time
-    sst = np.matmul(S, np.swapaxes(S, 1, 2))         # (T, 3, 3)
-    P = np.tile(np.eye(3), (S.shape[0], 1, 1)) - sst # (T, 3, 3)
-    Y = np.matmul(P, X)                              # (T, 3, G) 直交射影後
-
-    U2, _, _ = np.linalg.svd(Y, full_matrices=False) # (T, 3, 3)
-    pc1 = U2[:, :, 0:1]                              # (T, 3, 1)
-    proj = np.sum(pc1 * Y, axis=1)                   # (T, G)  各群へのPC1投影
-    bvp = proj.mean(axis=1)                          # (T,)    群平均
-
-    return bvp.astype(np.float32)
 
 
 

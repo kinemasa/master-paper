@@ -120,7 +120,7 @@ def find_folders(
             continue
         if exclude_keywords and any(kw in name for kw in exclude_keywords):
             continue
-
+        print(path)
         targets.append(path)
 
     return targets

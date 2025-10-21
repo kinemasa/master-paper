@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import torch
 import re
+
+
 def natural_key(s):
 
     return [int(text) if text.isdigit() else text.lower()
@@ -38,7 +40,7 @@ def load_pulse(filepath):
     try:
         # 区切り自動判定 (カンマ/タブ/スペース対応)
         df = pd.read_csv(filepath, sep=None, engine="python")
-
+        print(df)
         # 列名を小文字化して対応
         cols_lower = {c.lower(): c for c in df.columns}
         if "time_sec" not in cols_lower or "pulse" not in cols_lower:

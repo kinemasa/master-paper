@@ -14,17 +14,16 @@ from pulsewave.plot_pulsewave import plot_multi_roi_pulsewave
 from pulsewave.processing_pulsewave import normalize_by_envelope
 
 # ====== ユーザー設定 ======
-SELECT_FILES   = 2
+SELECT_FILES   = 1
 sample_rate    = 30
-start_time_sec = 2
-duration_sec   = 5
+start_time_sec = 5
+duration_sec   = 10
 title          = "Selected ROI pulsewaves"
 
 # 正規化の方法: "minmax" / "zscore" / "envelope" / "none"
-NORM_METHOD    = "none"
+NORM_METHOD    = "minmax"
 # True にすると全ファイルでの最小値・最大値を共通にして [0,1] 正規化（比較時に便利）
 GLOBAL_MINMAX  = False
-
 def roi_label_from_parent(csv_path: Path) -> str:
     method_folder = csv_path.parents[1].name
     roi_folder    = csv_path.parent.name
@@ -75,7 +74,9 @@ def main():
     label_counts = {}
 
     for csv_path in csv_paths:
+        print(csv_path)
         df = load_pulse(csv_path)
+        
         pulse = df["pulse"].to_numpy(dtype=float)
 
         base_label = roi_label_from_parent(csv_path)
