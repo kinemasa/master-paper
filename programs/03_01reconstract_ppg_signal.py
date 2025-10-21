@@ -15,13 +15,44 @@ from scipy.signal import resample_poly
 from pathlib import Path
 from typing import Optional, Iterable
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import glob
+from typing import Optional, List, Tuple, Dict, Iterable
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import load_ppg_pulse
 from deep_learning.evaluation import total_loss
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from pulsewave.processing_pulsewave import detrend_pulse,bandpass_filter_pulse
+
+
+_NUM_RE = re.compile(r"(\d+)")  # ファイル名から最初の数字列を拾う
+
+
+_NUM_RE = re.compile(r"(\d+)")  # ファイル名から最初の数字列を拾う
+
+def _pick_folder(label: str) -> Path:
+    p = select_folder(message=f"{label}")
+    if not p:
+        raise RuntimeError(f"{label} のフォルダ選択がキャンセルされました。")
+    return Path(p)
+
+def _build_index(folder: Path, suffixes: Iterable[str]=(".csv",)) -> Dict[int, Path]:
+    """
+    指定フォルダ直下のファイルから {sid(int): Path} を作る。
+    ルール: ファイル名中の「最初の数字列」を sid とみなす（001.csv / sub001.txt など）。
+    """
+    idx: Dict[int, Path] = {}
+    for suf in suffixes:
+        for p in folder.glob(f"*{suf}"):
+            m = _NUM_RE.search(p.stem)
+            if not m:
+                continue
+            sid = int(m.group(1))
+            # 既にあれば後勝ち・先勝ちは必要に応じて変更可
+            idx[sid] = p
+    return idx
+
 
 def load_pulse(filepath):
     """time_sec, pulse を持つCSV/TXTを読み込んでDataFrameを返す"""
@@ -79,171 +110,6 @@ def resample_ppg_100_to_30(ppg_signal: np.ndarray) -> np.ndarray:
     y30 = resample_poly(ppg_signal, up=3, down=10, window=('kaiser', 5.0))
     return y30.astype(np.float32)
 
-def find_file_for_subject_fast(
-    folder: Path,
-    sid: int,
-    roi: Optional[str] = None,
-    phase: Optional[str] = None,
-    *,
-    id_widths: Iterable[int] = (3, 4),
-    suffixes: Iterable[str] = (".csv", ".txt"),
-    phase_alias: Optional[dict] = None,
-    prefer_latest: bool = True,
-) -> Optional[Path]:
-    folder = Path(folder)
-    if not folder.exists():
-        return None
-
-    # IDタグ群を作成（"3","003","1020"など）
-    id_tags = {str(sid)}
-    for w in id_widths:
-        try:
-            id_tags.add(f"{sid:0{w}d}")
-        except Exception:
-            pass
-
-    # phaseトークン群（エイリアス展開）
-    phase_tokens = set()
-    if phase:
-        p = phase.lower()
-        phase_tokens.add(p)
-        if phase_alias and p in phase_alias:
-            phase_tokens.update(tok.lower() for tok in phase_alias[p])
-
-    # 検索パターンを組み立て（ID×ROI×phase×拡張子 の直積）
-    # 例: **/*003*cheek*before*.csv
-    patterns = []
-    for ext in suffixes:
-        for tag in id_tags:
-            if roi and phase_tokens:
-                for ph in phase_tokens:
-                    patterns.append(str(folder / f"**/*{tag}*{roi}*{ph}*{ext}"))
-            elif roi:
-                patterns.append(str(folder / f"**/*{tag}*{roi}*{ext}"))
-            elif phase_tokens:
-                for ph in phase_tokens:
-                    patterns.append(str(folder / f"**/*{tag}*{ph}*{ext}"))
-            else:
-                patterns.append(str(folder / f"**/*{tag}*{ext}"))
-
-    # パターンごとにヒット収集（recursive=True）
-    cand = []
-    for pat in patterns:
-        cand.extend(glob.glob(pat, recursive=True))
-
-    # 正規化 & 下流の最終チェック
-    cand = [Path(p) for p in set(cand)]  # 重複を削除
-    if roi:
-        roil = roi.lower()
-        cand = [p for p in cand if roil in p.name.lower()]
-    if phase_tokens:
-        cand = [p for p in cand if any(ph in p.name.lower() for ph in phase_tokens)]
-    if not cand:
-        return None
-
-    # prefer_latest=True なら最大mtimeだけを見る（ソートしない）
-    if prefer_latest and len(cand) > 1:
-        return max(cand, key=lambda p: p.stat().st_mtime)
-
-    return cand[0]
-
-# def find_file_for_subject(
-#     folder: Path,
-#     sid: int,
-#     roi: Optional[str] = None,             # PPGは None / "" でOK
-#     phase: Optional[str] = None,           # "before" / "after" など
-#     *,
-#     id_widths: Iterable[int] = (3, 4),     # 3桁と4桁の両対応（例: 003 と 1020）
-#     suffixes: Iterable[str] = (".csv", ".txt"),
-#     phase_alias: Optional[dict] = None,    # {"before": ["before","pre"], "after": ["after","post"]} など
-#     prefer_latest: bool = True             # 複数一致時は更新時刻が新しいものを返す
-# ) -> Optional[Path]:
-#     """
-#     指定条件にマッチするファイルを1つ返す。見つからなければ None。
-#     - IDは可変桁数（id_widths）でゼロ埋めタグも試す
-#     - roi/phase は省略可能（PPGのようにROIが無い命名でも可）
-#     - phaseはエイリアス（before=pre等）にも対応
-#     """
-#     folder = Path(folder)
-#     if not folder.exists():
-#         return None
-
-#     # 1) 候補収集（拡張子フィルタ）
-#     cand = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {s.lower() for s in suffixes}]
-#     if not cand:
-#         return None
-
-#     # 2) IDタグ（例: "3" / "003" / "1020"）
-#     id_tags = {str(sid)}
-#     for w in id_widths:
-#         try:
-#             id_tags.add(f"{sid:0{w}d}")
-#         except Exception:
-#             pass
-
-#     def name_lower(p: Path) -> str:
-#         # stem だけでなくフル名で見たい場合は p.name を使う
-#         return p.name.lower()
-
-#     # 3) IDフィルタ（いずれかのIDタグを含む）
-#     cand = [p for p in cand if any(tag in name_lower(p) for tag in id_tags)]
-#     if not cand:
-#         return None
-
-#     # 4) ROIフィルタ（指定があれば）
-#     if roi:
-#         roil = roi.lower()
-#         cand = [p for p in cand if roil in name_lower(p)]
-#         if not cand:
-#             return None
-
-#     # 5) phaseフィルタ（エイリアス展開込）
-#     if phase:
-#         ph = phase.lower()
-#         toks = {ph}
-#         if phase_alias and ph in phase_alias:
-#             toks.update(tok.lower() for tok in phase_alias[ph])
-#         cand = [p for p in cand if any(tok in name_lower(p) for tok in toks)]
-#         if not cand:
-#             return None
-
-#     # 6) 複数一致時の解決：更新時刻が新しいものを優先
-#     if len(cand) > 1 and prefer_latest:
-#         cand.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-#     return cand[0] if cand else None
-
-
-# def find_ppg_file(folder: Path, sid: int, phase: str) -> Optional[Path]:
-#     """
-#     例) 1020_after.csv / 1020_before.csv を探す
-#     """
-#     return find_file_for_subject(
-#         folder=folder,
-#         sid=sid,
-#         roi=None,                 # PPGはROI無し
-#         phase=phase,              # "before" or "after"
-#         id_widths=(4,),           # 4桁固定を優先
-#         suffixes=(".csv", ".txt"),
-#         phase_alias={"before": ["before", "pre"], "after": ["after", "post"]},
-#         prefer_latest=True
-#     )
-
-def find_ppg_file(folder: Path, sid: int, phase: str) -> Optional[Path]:
-    """
-    例) 1020_after.csv / 1020_before.csv を探す
-    """
-    return find_file_for_subject_fast(   # ← fast版に変更！
-        folder=folder,
-        sid=sid,
-        roi=None,                 # PPGはROI無し
-        phase=phase,              # "before" or "after"
-        id_widths=(4,),           # 4桁固定
-        suffixes=(".csv", ".txt"),
-        phase_alias={"before": ["before", "pre"], "after": ["after", "post"]},
-        prefer_latest=True
-    )
-
 
 def windowize(X: np.ndarray, y: np.ndarray, fs: int, win_sec: int, hop_sec: int):
     win = win_sec * fs
@@ -296,64 +162,117 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
 # ================ Dataset ================
 class RppgPpgDataset(Dataset):
-    def __init__(self, *, ICA_dir: Path, POS_dir: Path, CHROM_dir: Path, LGI_dir: Path,OMIT_dir:Path, PPG_dir: Path,
-                 fs: int, win_sec: int, hop_sec: int, roi: str, phase: str,
-                 subj_start: int, subj_end: int, omit_ids: Optional[List[int]] = None):
+    """
+    起動時にGUIで 6 フォルダ（ICA / POS / CHROM / LGI / OMIT / PPG）を選択。
+    各フォルダ直下に subject_num のファイル（例: 001.csv）がある前提。
+
+    - 初回に各フォルダを glob して {sid: path} のインデックスを作成（高速）
+    - 6フォルダ共通で存在する subject のみ学習対象
+    - subj_start / subj_end / omit_ids で追加フィルタ
+    - PPGは ROI なし前提（PPG_before 等の固定フォルダを選んでください）
+    """
+    def __init__(
+        self,
+        *,
+        fs: int,
+        win_sec: int,
+        hop_sec: int,
+        subj_start: Optional[int] = None,
+        subj_end: Optional[int] = None,
+        omit_ids: Optional[List[int]] = None,
+        allow_txt: bool = False,  # True で .txt も対象に
+        fs_ppg_src: int = 100,    # 元PPGのサンプリング周波数
+    ):
         self.samples: List[Tuple[np.ndarray, np.ndarray]] = []
+        self.fs = fs
+        self.win_sec = win_sec
+        self.hop_sec = hop_sec
+        self.fs_ppg_src = fs_ppg_src
 
-        for sid in range(subj_start, subj_end + 1):
+        # ---- 必ずGUIでフォルダ選択 ----
+        ICA_dir   = _pick_folder("ICA")
+        POS_dir   = _pick_folder("POS")
+        CHROM_dir = _pick_folder("CHROM")
+        LGI_dir   = _pick_folder("LGI")
+        OMIT_dir  = _pick_folder("OMIT")
+        PPG_dir   = _pick_folder("PPG（ROIなし/phase固定）")
 
-            p_ica   = find_file_for_subject(ICA_dir,   sid, roi, phase)
-            p_pos   = find_file_for_subject(POS_dir,   sid, roi, phase)
-            p_chrom = find_file_for_subject(CHROM_dir, sid, roi, phase)
-            p_lgi   = find_file_for_subject(LGI_dir,   sid, roi, phase)
-            p_omit  = find_file_for_subject(OMIT_dir,sid,roi,phase)
-            p_ppg   =find_ppg_file(PPG_dir,sid,phase)
+        # ---- インデックス作成（各フォルダ一度だけスキャン）----
+        suffixes = (".csv", ".txt") if allow_txt else (".csv",)
+        idx_ica   = _build_index(ICA_dir,   suffixes)
+        idx_pos   = _build_index(POS_dir,   suffixes)
+        idx_chrom = _build_index(CHROM_dir, suffixes)
+        idx_lgi   = _build_index(LGI_dir,   suffixes)
+        idx_omit  = _build_index(OMIT_dir,  suffixes)
+        idx_ppg   = _build_index(PPG_dir,   suffixes)
 
-            if not all([p_ica, p_pos, p_chrom, p_lgi,p_omit, p_ppg]):
-                # 見つからないものがあればスキップ
-                continue
+        # ---- 共通IDを抽出 ----
+        common_ids = (
+            set(idx_ica) & set(idx_pos) & set(idx_chrom) &
+            set(idx_lgi) & set(idx_omit) & set(idx_ppg)
+        )
 
-            # あなたの読み込み関数を使用
+        # 追加フィルタ（範囲・除外）
+        if subj_start is not None and subj_end is not None:
+            common_ids &= set(range(subj_start, subj_end + 1))
+        if omit_ids:
+            common_ids -= set(omit_ids)
+
+        if not common_ids:
+            raise RuntimeError("共通の被験者が見つかりません。選んだフォルダやファイル名（subject番号）を確認してください。")
+
+        # ---- 読み込みループ ----
+        for sid in sorted(common_ids):
+            p_ica, p_pos, p_chrom = idx_ica[sid], idx_pos[sid], idx_chrom[sid]
+            p_lgi, p_omit, p_ppg  = idx_lgi[sid], idx_omit[sid], idx_ppg[sid]
+
+            # 読み込み
             df_ica   = load_pulse(p_ica)
             df_pos   = load_pulse(p_pos)
             df_chrom = load_pulse(p_chrom)
             df_lgi   = load_pulse(p_lgi)
-            df_omit = load_pulse(p_omit)
-            df_ppg   = load_ppg_pulse(p_ppg)  # PPGは別関数とのこと
+            df_omit  = load_pulse(p_omit)
+            df_ppg   = load_ppg_pulse(p_ppg)
 
-            if any(d is None for d in [df_ica, df_pos, df_chrom, df_lgi,df_omit, df_ppg]):
+            if any(d is None for d in [df_ica, df_pos, df_chrom, df_lgi, df_omit, df_ppg]):
+                print(f"⚠️ skip SID {sid:03d} - 読み込み失敗あり")
                 continue
 
-            # numpy化
-            s_ica   = df_ica["value"].to_numpy(dtype=float)
-            s_pos   = df_pos["value"].to_numpy(dtype=float)
-            s_chrom = df_chrom["value"].to_numpy(dtype=float)
-            s_lgi   = df_lgi["value"].to_numpy(dtype=float)
-            s_omit  =df_omit["value"].to_numpy(dtype=float)
-            s_ppg   = df_ppg["value"].to_numpy(dtype=float)
-            
-            # ★ PPGだけリサンプリング＆デトレンド＆バンドパス
-            s_ppg = preprocess_ppg_signal(s_ppg, fs_ppg=100, fs_target=30)
+            try:
+                s_ica   = df_ica["value"].to_numpy(dtype=float)
+                s_pos   = df_pos["value"].to_numpy(dtype=float)
+                s_chrom = df_chrom["value"].to_numpy(dtype=float)
+                s_lgi   = df_lgi["value"].to_numpy(dtype=float)
+                s_omit  = df_omit["value"].to_numpy(dtype=float)
+                s_ppg   = df_ppg["value"].to_numpy(dtype=float)
+            except KeyError:
+                print(f"⚠️ skip SID {sid:03d} - 'value' 列が不足")
+                continue
+
+            # PPGのみリサンプリング＆前処理（関数内でデトレンド/バンドパスも）
+            s_ppg = preprocess_ppg_signal(s_ppg, fs_ppg=self.fs_ppg_src, fs_target=self.fs)
+
             # 長さ合わせ（最短）
-            T = min(map(len, [s_ica, s_pos, s_chrom, s_lgi, s_ppg]))
-            s_ica, s_pos, s_chrom, s_lgi, s_ppg = s_ica[:T], s_pos[:T], s_chrom[:T], s_lgi[:T], s_ppg[:T]
+            T = min(map(len, [s_ica, s_pos, s_chrom, s_lgi, s_omit, s_ppg]))
+            s_ica, s_pos, s_chrom, s_lgi, s_omit, s_ppg = (
+                s_ica[:T], s_pos[:T], s_chrom[:T], s_lgi[:T], s_omit[:T], s_ppg[:T]
+            )
 
+            # 入力5ch（順序固定）
+            X = np.stack([s_lgi, s_pos, s_chrom, s_ica, s_omit], axis=1)  # (T,5)
+            y = s_ppg  # (T,)
 
-            X = np.stack([s_lgi, s_pos, s_chrom, s_ica,s_omit], axis=1)  # (T,4)  チャネル順は任意でOK
-            y = s_ppg                                            # (T,)
-
-            self.samples.extend(windowize(X, y, fs, win_sec, hop_sec))
-            print(self.samples)
+            self.samples.extend(windowize(X, y, self.fs, self.win_sec, self.hop_sec))
 
         if len(self.samples) == 0:
-            raise RuntimeError("サンプルが見つかりません。ファイル名に ROI / phase / 3桁ID が含まれているか確認してください。")
+            raise RuntimeError("サンプルが0件でした。ID対応や窓設定を確認してください。")
 
-    def __len__(self):  return len(self.samples)
+    def __len__(self):
+        return len(self.samples)
+
     def __getitem__(self, idx):
-        xs, ys = self.samples[idx]              # (T,C), (T,1)
+        xs, ys = self.samples[idx]
         return torch.from_numpy(xs), torch.from_numpy(ys)
-    
 
 # ================ 学習ヘルパ ================
 def make_loaders(dataset: RppgPpgDataset, batch_size: int, num_workers: int,
@@ -409,21 +328,13 @@ def main():
     # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000002)
     
-    ICA_folder = select_folder(message="ICA")
-    POS_folder = select_folder(message="POS")
-    CHROM_folder = select_folder(message="CHROM")
-    LGI_folder = select_folder(message="LGI")
-    OMIT_folder =select_folder(message="OMIT")
-    PPG_folder = select_folder(message="PPG")
+    # ICA_folder = select_folder(message="ICA")
+    # POS_folder = select_folder(message="POS")
+    # CHROM_folder = select_folder(message="CHROM")
+    # LGI_folder = select_folder(message="LGI")
+    # OMIT_folder =select_folder(message="OMIT")
+    # PPG_folder = select_folder(message="PPG")
     
-       # --- ここで Config を main 内に直置き ---
-    fs        = 30
-    win_sec   = 10
-    hop_sec   = 5
-    roi       = "glabella"     # ← 必要に応じて変更
-    phase     = "after"     # ← "before" / "after"
-    subj_min  = 1020
-    subj_max  = 1020
 
     train_ratio = 0.7
     val_ratio   = 0.15
@@ -433,31 +344,17 @@ def main():
     lr          = 1e-3
     device      = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # # --- OMIT の読み込み（任意フォーマット: IDが含まれる行を抽出） ---
-    # omit_ids = []
-    # if OMIT_folder and Path(OMIT_folder).exists():
-    #     # 任意：フォルダ内の txt/csv の数字を拾う
-    #     for p in Path(OMIT_folder).glob("**/*"):
-    #         if p.suffix.lower() not in [".txt", ".csv"]:
-    #             continue
-    #         try:
-    #             text = p.read_text(encoding="utf-8", errors="ignore")
-    #             ids = re.findall(r"\d+", text)
-    #             omit_ids.extend(int(x) for x in ids)
-    #         except Exception:
-    #             pass
-    #     omit_ids = sorted(set(omit_ids))
-    #     print(f"OMIT IDs: {omit_ids}")
 
     # --- Dataset 構築 ---
     dataset = RppgPpgDataset(
-        ICA_dir=Path(ICA_folder), POS_dir=Path(POS_folder),
-        CHROM_dir=Path(CHROM_folder), LGI_dir=Path(LGI_folder),
-        OMIT_dir=Path(OMIT_folder),
-        PPG_dir=Path(PPG_folder),
-        fs=fs, win_sec=win_sec, hop_sec=hop_sec,
-        roi=roi, phase=phase,
-        subj_start=subj_min, subj_end=subj_max
+    fs=30,            # 学習/推論で使うターゲットFs
+    win_sec=10,
+    hop_sec=5,
+    subj_start=1020,     # 任意
+    subj_end=1020,     # 任意
+    omit_ids=[], # 任意
+    allow_txt=False,  # .txtも対象なら True
+    fs_ppg_src=100,   # 元PPGのFsに合わせて
     )
 
     dl_train, dl_val, dl_test = make_loaders(dataset, batch_size, num_workers, train_ratio, val_ratio)
