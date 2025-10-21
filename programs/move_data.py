@@ -229,7 +229,7 @@ def main():
     print("=== 1) まとめ (_1_なし / before-after対応) ===")
     root_src = select_folder("元データ root_src を選択")
     root_dst = select_folder("出力先 root_dst を選択")
-    methods = ["ICA","OMIT"]
+    methods = ["CHORM"]
 
     flatten_to_method_style_before_after(root_src, root_dst, methods=methods)
 

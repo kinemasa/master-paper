@@ -68,3 +68,30 @@ def dtw_distance(a, b, znorm=True, normalize="path", window=None):
 
     else:  # None
         return math.sqrt(dist2)
+    
+    
+def weighted_mae(y_hat, y, w, eps=1e-8):
+    num = (w * (y_hat - y).abs()).sum(dim=1)     # (B,1)
+    den = w.sum(dim=1).clamp_min(eps)            # (B,1)
+    return (num/den).mean()
+
+def weighted_corr_loss(y_hat, y, w, eps=1e-8):
+    w = w / (w.sum(dim=1, keepdim=True).clamp_min(eps))
+    mu_h = (w * y_hat).sum(dim=1, keepdim=True); h0 = y_hat - mu_h
+    mu_y = (w * y).sum(dim=1, keepdim=True);     y0 = y - mu_y
+    cov = (w * h0 * y0).sum(dim=1, keepdim=True)
+    var_h = (w * h0**2).sum(dim=1, keepdim=True).clamp_min(eps)
+    var_y = (w * y0**2).sum(dim=1, keepdim=True).clamp_min(eps)
+    rho = cov / (var_h.sqrt() * var_y.sqrt() + eps)
+    return (1.0 - rho.pow(2)).mean()
+
+def weight_regularizers(w, pi=0.6):
+    L_cov = (w.mean() - pi)**2
+    L_tv  = (w[:,1:] - w[:,:-1]).abs().mean()
+    return L_cov, L_tv
+
+def total_loss(y_hat, y_true, w, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01):
+    L_time = weighted_mae(y_hat, y_true, w)
+    L_corr = weighted_corr_loss(y_hat, y_true, w)
+    L_cov, L_tv = weight_regularizers(w, pi=0.6)
+    return L_time + lam_corr*L_corr + lam_cov*L_cov + lam_tv*L_tv

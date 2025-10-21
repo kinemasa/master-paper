@@ -55,6 +55,56 @@ def load_pulse(filepath):
     except Exception as e:
         print(f"[load_pulse_csv] 読み込みエラー: {e}")
         return None
+    
+def load_ppg_pulse(filepath):
+    """
+    value, timestamp を持つ CSV/TXT を読み込み、
+    time_sec, pulse の列に変換して DataFrame を返す
+    """
+    try:
+        # 区切り自動判定 (カンマ/タブ/スペース対応)
+        df = pd.read_csv(filepath, sep=None)
+
+        print(df.head())
+
+        # 列名を小文字化して検索
+        cols_lower = {c.lower(): c for c in df.columns}
+
+        # time_sec/pulseに変換
+        if "timestamp" in cols_lower:
+            df["time_sec"] = df[cols_lower["timestamp"]]
+        elif "time" in cols_lower:
+            df["time_sec"] = df[cols_lower["time"]]
+        else:
+            raise ValueError(f"'timestamp' 列が見つかりません: {df.columns}")
+
+        if "value" in cols_lower:
+            df["pulse"] = df[cols_lower["value"]]
+        elif "pulse" in cols_lower:
+            df["pulse"] = df[cols_lower["pulse"]]
+        else:
+            raise ValueError(f"'value' 列が見つかりません: {df.columns}")
+
+        # 数値化できる部分は変換（文字列時間は残す）
+        df["pulse"] = pd.to_numeric(df["pulse"], errors="raise")
+
+        # timestamp が "18:09.9" などの場合は文字列でそのまま保持
+        # → 必要に応じて秒数に変換する例:
+        if df["time_sec"].dtype == "object":
+            try:
+                df["time_sec"] = pd.to_timedelta(df["time_sec"]).dt.total_seconds()
+            except Exception:
+                pass  # 変換できない場合はそのまま
+
+        # 必要な列だけ残す
+        df = df[["time_sec", "pulse"]]
+
+        return df
+
+    except Exception as e:
+        print(f"[load_pulse] 読み込みエラー: {e}")
+        return None
+    
 
 def check_header(path):
     ## ヘッダーの有無を確認する。
