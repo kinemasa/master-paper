@@ -165,43 +165,11 @@ def windowize(X: np.ndarray, y: np.ndarray, fs: int, win_sec: int, hop_sec: int)
 
 
 @torch.no_grad()
-# def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name: str):
-#     """
-#     すべてのデータセット（train / val / test）で
-#     TruePPG / PredPPG / Quality をCSVで保存する。
-#     """
-#     model.eval()
-#     out_dir = out_dir / subset_name
-#     out_dir.mkdir(parents=True, exist_ok=True)
-
-#     sample_idx = 0
-#     for xs, ys in loader:
-#         xs = xs.to(device)
-#         ys = ys.to(device)
-#         y_hat, w_hat, _ = model(xs)
-
-#         B, T, _ = y_hat.shape
-#         for i in range(B):
-#             sample_idx += 1
-#             y_true = ys[i, :, 0].cpu().numpy()
-#             y_pred = y_hat[i, :, 0].cpu().numpy()
-#             w = w_hat[i, :, 0].cpu().numpy()
-#             t = np.arange(T) / fs
-
-#             df_out = pd.DataFrame({
-#                 "time_sec": t,
-#                 "true_ppg": y_true,
-#                 "pred_ppg": y_pred,
-#                 "quality": w
-#             })
-#             csv_path = out_dir / f"sample_{sample_idx:05d}.csv"
-#             df_out.to_csv(csv_path, index=False)
-#     print(f"✅ {subset_name} set: {sample_idx} samples exported to {out_dir}")
-    
 def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name: str):
     """
     すべてのデータセット（train / val / test）で
-    Input(推定前) / TruePPG / PredPPG / Quality をCSVで保存する。
+    TruePPG / PredPPG / Quality / 各入力チャネル(LGI, POS, CHROM, ICA, OMIT)
+    をCSVで保存する。（チャネルはwindowize後のz-score済み値）
     """
     model.eval()
     out_dir = out_dir / subset_name
@@ -209,42 +177,45 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
     sample_idx = 0
     for xs, ys in loader:
-        xs = xs.to(device)
-        ys = ys.to(device)
-        y_hat, w_hat, _ = model(xs)
+        xs = xs.to(device)                      # (B, T, C=5)
+        ys = ys.to(device)                      # (B, T, 1)
+        y_hat, w_hat, _ = model(xs)             # (B, T, 1), (B, T, 1)
 
         B, T, _ = y_hat.shape
         for i in range(B):
             sample_idx += 1
-            # --- 推定前の入力波形 ---
-            x_input = xs[i].cpu().numpy()  # shape: [T, C]
-            n_ch = x_input.shape[1] if x_input.ndim > 1 else 1
 
-            # --- 推定後の波形 ---
+            # 教師・予測・品質
             y_true = ys[i, :, 0].cpu().numpy()
             y_pred = y_hat[i, :, 0].cpu().numpy()
-            w = w_hat[i, :, 0].cpu().numpy()
+            w      = w_hat[i, :, 0].cpu().numpy()
+
+            # 入力5チャネル（順序: LGI, POS, CHROM, ICA, OMIT）
+            X_win = xs[i].cpu().numpy()         # (T, 5)
+            lgi   = X_win[:, 0]
+            pos   = X_win[:, 1]
+            chrom = X_win[:, 2]
+            ica   = X_win[:, 3]
+            omit  = X_win[:, 4]
+
             t = np.arange(T) / fs
 
-            # --- データフレーム化 ---
-            df_dict = {"time_sec": t}
-
-            # 入力チャネルを追加
-            for ch in range(n_ch):
-                df_dict[f"input_ch{ch}"] = x_input[:, ch] if n_ch > 1 else x_input
-
-            df_dict.update({
+            df_out = pd.DataFrame({
+                "time_sec": t,
                 "true_ppg": y_true,
                 "pred_ppg": y_pred,
-                "quality": w
+                "quality": w,
+                "lgi": lgi,
+                "pos": pos,
+                "chrom": chrom,
+                "ica": ica,
+                "omit": omit,
             })
 
-            df_out = pd.DataFrame(df_dict)
             csv_path = out_dir / f"sample_{sample_idx:05d}.csv"
             df_out.to_csv(csv_path, index=False)
 
     print(f"✅ {subset_name} set: {sample_idx} samples exported to {out_dir}")
-    
 
 # ================ Dataset ================
 class RppgPpgDataset(Dataset):
