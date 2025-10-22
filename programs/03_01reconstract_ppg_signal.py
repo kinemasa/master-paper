@@ -132,7 +132,9 @@ def preprocess_ppg_signal(ppg_signal: np.ndarray, fs_ppg: int = 100, fs_target: 
         ppg_dt = detrend(ppg_ds)
 
     # --- (3) バンドパス (0.7–3Hz) ---
-    ppg_bp = bandpass_filter_pulse(ppg_dt, band_width=[0.7, 3.0], sample_rate=fs_target)
+    ppg_bp = bandpass_filter_pulse(ppg_dt, band_width=[0.1, 10.0], sample_rate=fs_target)
+    ##　データセットのPPGは反転させたほうが良いので逆で読み込む
+    ppg_bp = - ppg_bp 
 
 
     return ppg_bp.astype(np.float32)
@@ -366,7 +368,7 @@ def main():
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000002)
     
       # ログCSVの準備（Excelで開きやすいようにUTF-8 BOM付き）
-    out_root = Path("./outputs")
+    out_root = Path("./outputs-noband")
     out_root.mkdir(parents=True, exist_ok=True)
     hist_csv = out_root / "training_log.csv"
 
@@ -428,7 +430,7 @@ def main():
         # ← ここでCSVに1行追記
         with open(hist_csv, "a", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([datetime.now().isoformat(timespec="seconds"), epoch, f"{tr:.6f}", f"{va:.6f}", f"{cur_lr:.6e}"])
+            writer.writerow(f"[{epoch:03d}] train={tr:.4f}  val={va:.4f}  lr={optimizer.param_groups[0]['lr']:.2e}")
 
 
         if va < best_val:
@@ -448,7 +450,7 @@ def main():
     print(f"Saved: {save_path}")
     
     # --- 推定結果を全データで書き出し ---
-    out_root = Path("./outputs")
+    out_root = Path("./outputs-noband")
     fs=30
     export_all_predictions(model, dl_train, device, fs, out_root, "train")
     export_all_predictions(model, dl_val,   device, fs, out_root, "val")

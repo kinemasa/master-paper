@@ -1,0 +1,8 @@
+{
+  "ICA": "E:\\dataset\\deep-learning-dataset\\ICA_glabella_before",
+  "POS": "E:\\dataset\\deep-learning-dataset\\POS_glabella_before",
+  "CHROM": "E:\\dataset\\deep-learning-dataset\\CHROM_glabella_before",
+  "LGI": "E:\\dataset\\deep-learning-dataset\\LGI_glabella_before",
+  "OMIT": "E:\\dataset\\deep-learning-dataset\\OMIT_glabella_before",
+  "PPG（ROIなし/phase固定）": "E:\\dataset\\deep-learning-dataset\\PPG_e_befor"
+}

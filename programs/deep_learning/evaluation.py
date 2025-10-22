@@ -1,6 +1,6 @@
 import numpy as np
 import math
-
+import torch
 def pearson_r(a, b, eps=1e-12):
     a = np.asarray(a); b = np.asarray(b)
     da = a - a.mean(); db = b - b.mean()
@@ -76,7 +76,7 @@ def weighted_mae(y_hat, y, w, eps=1e-8):
     return (num/den).mean()
 
 def mae(y_hat, y, w, eps=1e-8):
-    w=1
+    w = torch.ones_like(y)  # yと同じ形状の重み（全て1）
     num = (w * (y_hat - y).abs()).sum(dim=1)     # (B,1)
     den = w.sum(dim=1).clamp_min(eps)            # (B,1)
     return (num/den).mean()
