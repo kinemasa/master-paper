@@ -132,15 +132,10 @@ class ReconstractPPG_with_QaulityHead(nn.Module):
 
         # ---------- 2ヘッド出力 ----------
         y_hat = self.y_head(H)                                   # (B,T,1)
-        w_from_fused = self.w_head(H)                            # (B,T,1)
+        w_hat = self.w_head(H)                            # (B,T,1)
 
         # 追加：QualityHead1Dの元々のwも計算しておく（任意）
         w_from_qhead = self.qhead(x)                             # (B,T,1)
 
-        # オプション：両者を組み合わせて最終wに（例：幾何平均）
-        if self.combine_quality_with_head:
-            w_hat = torch.sqrt(w_from_fused * w_from_qhead).clamp(0,1)
-        else:
-            w_hat = w_from_fused
 
         return y_hat, w_hat, w_from_qhead  # 可視化・比較に便利
