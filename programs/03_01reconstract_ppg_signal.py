@@ -22,7 +22,7 @@ from typing import Optional, List, Tuple, Dict, Iterable
 ## ファイル選択・ロード系
 from myutils.select_folder import select_folder
 from myutils.load_and_save_folder import load_ppg_pulse
-from deep_learning.evaluation import total_loss,weighted_mae,mae
+from deep_learning.evaluation import total_loss,weighted_mae,mae,mae_and_corr
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from pulsewave.processing_pulsewave import detrend_pulse,bandpass_filter_pulse
 import json
@@ -357,7 +357,8 @@ def train_one_epoch(model, loader, optimizer, device):
         ys = ys.to(device)          # (B,T,1)
         y_hat, w_hat, _ = model(xs) # (B,T,1), (B,T,1)
         # loss = total_loss(y_hat, ys, w_hat, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01)
-        loss = mae(y_hat, ys,w_hat)
+        # loss = mae(y_hat, ys,w_hat)
+        loss =mae_and_corr(y_hat,ys,1e-8)
         optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -464,12 +465,12 @@ def main():
 
     # --- 保存 ---
     out = Path("./checkpoints"); out.mkdir(parents=True, exist_ok=True)
-    save_path = out / "reconppg_quality_best.pth"
+    save_path = out / "reconppg_quality_best_corrmae.pth"
     torch.save(model.state_dict(), save_path)
     print(f"Saved: {save_path}")
     
     # --- 推定結果を全データで書き出し ---
-    out_root = Path("./outputs-noband")
+    out_root = Path("./outputs-corrmae")
     fs=30
     export_all_predictions(model, dl_train, device, fs, out_root, "train")
     export_all_predictions(model, dl_val,   device, fs, out_root, "val")

@@ -91,10 +91,37 @@ def weighted_corr_loss(y_hat, y, w, eps=1e-8):
     rho = cov / (var_h.sqrt() * var_y.sqrt() + eps)
     return (1.0 - rho.pow(2)).mean()
 
+def corr_loss(y_hat, y, eps=1e-8):
+    # 平均を計算
+    mu_h = y_hat.mean(dim=1, keepdim=True)
+    mu_y = y.mean(dim=1, keepdim=True)
+
+    # 偏差を計算
+    h0 = y_hat - mu_h
+    y0 = y - mu_y
+
+    # 共分散と分散
+    cov = (h0 * y0).mean(dim=1, keepdim=True)
+    var_h = (h0 ** 2).mean(dim=1, keepdim=True).clamp_min(eps)
+    var_y = (y0 ** 2).mean(dim=1, keepdim=True).clamp_min(eps)
+
+    # 相関係数
+    rho = cov / (var_h.sqrt() * var_y.sqrt() + eps)
+
+    # 相関が高いほど損失が小さくなるように
+    return (1.0 - rho.pow(2)).mean()
+
 def weight_regularizers(w, pi=0.6):
     L_cov = (w.mean() - pi)**2
     L_tv  = (w[:,1:] - w[:,:-1]).abs().mean()
     return L_cov, L_tv
+
+def mae_and_corr(y_hat, y, eps=1e-8):
+    
+    mae_loss = mae(y_hat,y,eps=1e-8)
+    corr_loss = corr_loss(y_hat,y,eps=1e-8)
+    
+    return (mae_loss+corr_loss)
 
 def total_loss(y_hat, y_true, w, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01):
     L_time = weighted_mae(y_hat, y_true, w)
