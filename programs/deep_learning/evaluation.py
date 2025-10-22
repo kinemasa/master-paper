@@ -91,7 +91,7 @@ def weighted_corr_loss(y_hat, y, w, eps=1e-8):
     rho = cov / (var_h.sqrt() * var_y.sqrt() + eps)
     return (1.0 - rho.pow(2)).mean()
 
-def corr_loss(y_hat, y, eps=1e-8):
+def corr(y_hat, y, eps=1e-8):
     # 平均を計算
     mu_h = y_hat.mean(dim=1, keepdim=True)
     mu_y = y.mean(dim=1, keepdim=True)
@@ -119,7 +119,7 @@ def weight_regularizers(w, pi=0.6):
 def mae_and_corr (y_hat, y,w,eps=1e-8):
     
     mae_loss = mae(y_hat,y,w,eps=1e-8)
-    corr_loss = corr_loss(y_hat,y,eps=1e-8)
+    corr_loss = corr(y_hat,y,eps=1e-8)
     
     return (mae_loss+corr_loss)
 
