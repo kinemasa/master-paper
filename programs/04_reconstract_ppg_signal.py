@@ -9,6 +9,7 @@ from deep_learning.make_dataloader import make_loaders
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from deep_learning.evaluation import total_loss, mae_and_corr
 
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 def set_seed(seed: int):
     random.seed(seed)
