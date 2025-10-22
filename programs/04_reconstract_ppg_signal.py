@@ -3,11 +3,11 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import numpy as np
-
+import pandas as pd
 from deep_learning.make_dataset import RppgPpgDataset
 from deep_learning.make_dataloader import make_loaders
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
-from deep_learning.evaluation import total_loss, mae_and_corr
+from deep_learning.evaluation import total_loss, mae_and_corr,mae
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -26,7 +26,7 @@ def train_one_epoch(model, loader, optimizer, device,eps):
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
         y_hat, w_hat, _ = model(xs)
-        loss = mae_and_corr(y_hat, ys, eps, w_hat)
+        loss =mae(y_hat, ys,w_hat,eps)
         optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -48,9 +48,63 @@ def evaluate(model, loader, device,eps):
     return total / len(loader.dataset)
 
 
+@torch.no_grad()
+def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name: str):
+    """
+    すべてのデータセット（train / val / test）で
+    TruePPG / PredPPG / Quality / 各入力チャネル(LGI, POS, CHROM, ICA, OMIT)
+    をCSVで保存する。（チャネルはwindowize後のz-score済み値）
+    """
+    model.eval()
+    out_dir = out_dir / subset_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_idx = 0
+    for xs, ys in loader:
+        xs = xs.to(device)                      # (B, T, C=5)
+        ys = ys.to(device)                      # (B, T, 1)
+        y_hat, w_hat, _ = model(xs)             # (B, T, 1), (B, T, 1)
+
+        B, T, _ = y_hat.shape
+        for i in range(B):
+            sample_idx += 1
+
+            # 教師・予測・品質
+            y_true = ys[i, :, 0].cpu().numpy()
+            y_pred = y_hat[i, :, 0].cpu().numpy()
+            w      = w_hat[i, :, 0].cpu().numpy()
+
+            # 入力5チャネル（順序: LGI, POS, CHROM, ICA, OMIT）
+            X_win = xs[i].cpu().numpy()         # (T, 5)
+            lgi   = X_win[:, 0]
+            pos   = X_win[:, 1]
+            chrom = X_win[:, 2]
+            ica   = X_win[:, 3]
+            omit  = X_win[:, 4]
+
+            t = np.arange(T) / fs
+
+            df_out = pd.DataFrame({
+                "time_sec": t,
+                "true_ppg": y_true,
+                "pred_ppg": y_pred,
+                "quality": w,
+                "lgi": lgi,
+                "pos": pos,
+                "chrom": chrom,
+                "ica": ica,
+                "omit": omit,
+            })
+
+            csv_path = out_dir / f"sample_{sample_idx:05d}.csv"
+            df_out.to_csv(csv_path, index=False)
+
+    print(f"✅ {subset_name} set: {sample_idx} samples exported to {out_dir}")
+
+
 def main():
     # ===================== 設定ここに集約 =====================
-    exp_name = "corrmae_baseline"
+    exp_name = "onlylstm_glallea_before_corrmae"
 
     # Dataset設定
     framerate = 30
@@ -158,6 +212,13 @@ def main():
 
     torch.save(model.state_dict(), ckpt_path)
     print(f"Saved: {ckpt_path}")
+
+     # --- 推定結果を全データで書き出し ---
+    out_root = Path("./outputs-corrmae")
+    fs=30
+    export_all_predictions(model, dl_train, device, fs, out_root, "train")
+    export_all_predictions(model, dl_val,   device, fs, out_root, "val")
+    export_all_predictions(model, dl_test,  device, fs, out_root, "test")
 
 
 if __name__ == "__main__":
