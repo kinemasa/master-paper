@@ -86,56 +86,40 @@ import torch.nn.functional as F
 
 class ReconstractPPG_with_QaulityHead(nn.Module):
     """
-    入力:  x (B,T,C)  例: C=4（POS/CHROM/LGI/ICA）
-    出力:  y_hat (B,T,1) : 推定PPG波形
-           w_hat (B,T,1) : 信頼度(0〜1)
-    仕組み:
-      - LSTMBlock×3 で長期依存の特徴 H_lstm (B,T,30)
-      - QualityHead1D の conv1 を流用して CNN特徴 H_cnn (B,T,Hc) を作る
-      - [H_lstm, H_cnn] を結合 → 全結合で融合 → 2つのヘッドで y_hat と w_hat
+    入力:  x (B,T,C)
+    出力:  y_hat (B,T,1) : 推定PPG波形（LSTMのみ）
+           w_hat (B,T,1) : 信頼度(0〜1)（QualityHeadの出力をそのまま採用）
+           w_from_qhead  : 同上（可視化・互換用に返す）
+    融合なし：LSTM特徴とCNN特徴の結合・流用を完全に廃止
     """
     def __init__(self, input_size=4, lstm_dims=(90,60,30), cnn_hidden=32,
                  drop=0.1, combine_quality_with_head=False):
         super().__init__()
+        # ---- LSTM Stack ----
         self.block1 = LSTMBlock(input_size,   lstm_dims[0], dropout=drop)
         self.block2 = LSTMBlock(lstm_dims[0], lstm_dims[1], dropout=drop)
         self.block3 = LSTMBlock(lstm_dims[1], lstm_dims[2], dropout=drop)
 
-        # 品質ヘッドは「信頼度wの予測」に使う *かつ* conv1 を特徴抽出器として流用
+        # ---- Quality head（wの推定専用。conv1 の流用は行わない）----
         self.qhead = QualityHead1D(input_size, hidden=cnn_hidden, k=5)
-        self.cnn_hidden = cnn_hidden
-        self.combine_quality_with_head = combine_quality_with_head
 
-        fuse_dim = lstm_dims[2] + cnn_hidden
-        self.fuse = nn.Linear(fuse_dim, fuse_dim)  # 軽い融合層
-        self.y_head = nn.Linear(fuse_dim, 1)       # 波形出力
-        self.w_head = nn.Sequential(               # 信頼度出力
-            nn.Linear(fuse_dim, 1),
-            nn.Sigmoid()
-        )
+        # ---- 出力ヘッド（LSTM出力のみを使用）----
+        last_dim = lstm_dims[2]
+        self.y_head = nn.Linear(last_dim, 1)      # 波形出力はLSTMのみから
+        # w_hatはqheadの出力をそのまま使うので学習層は作らない（互換が必要なら以下を有効に）
+        # self.w_head = nn.Sequential(nn.Linear(last_dim, 1), nn.Sigmoid())
 
     def forward(self, x):  # x: (B,T,C)
         # ---------- LSTM特徴 ----------
-        h = self.block1(x, apply_dropout=True)     # (B,T,90)
-        h = self.block2(h, apply_dropout=True)     # (B,T,60)
-        H_lstm = self.block3(h, apply_dropout=True)# (B,T,30)
+        h = self.block1(x, apply_dropout=True)      # (B,T,90)
+        h = self.block2(h, apply_dropout=True)      # (B,T,60)
+        H_lstm = self.block3(h, apply_dropout=True) # (B,T,30)
 
-        # ---------- CNN特徴（QualityHead1Dのconv1を流用） ----------
-        # conv1は (B,C,T) を受けるので転置、活性化して (B,T,Hc) へ戻す
-        h_c = x.transpose(1,2)                                   # (B,C,T)
-        h_c = F.relu(self.qhead.conv1(h_c))                      # (B,Hc,T)
-        H_cnn = h_c.transpose(1,2)                               # (B,T,Hc)
+        # ---------- 出力 ----------
+        y_hat = self.y_head(H_lstm)                 # (B,T,1) ← LSTMのみ
 
-        # ---------- 融合 ----------
-        H = torch.cat([H_lstm, H_cnn], dim=-1)                   # (B,T,30+Hc)
-        H = F.gelu(self.fuse(H))                                 # (B,T,30+Hc)
+        # 品質はQualityHeadから直接（主枝とは非結合）
+        w_from_qhead = self.qhead(x)                # (B,T,1)
+        w_hat = w_from_qhead                        # そのまま採用
 
-        # ---------- 2ヘッド出力 ----------
-        y_hat = self.y_head(H)                                   # (B,T,1)
-        w_hat = self.w_head(H)                            # (B,T,1)
-
-        # 追加：QualityHead1Dの元々のwも計算しておく（任意）
-        w_from_qhead = self.qhead(x)                             # (B,T,1)
-
-
-        return y_hat, w_hat, w_from_qhead  # 可視化・比較に便利
+        return y_hat, w_hat, w_from_qhead
