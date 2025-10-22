@@ -245,7 +245,21 @@ class RppgPpgDataset(Dataset):
         self.win_sec = win_sec
         self.hop_sec = hop_sec
         self.fs_ppg_src = fs_ppg_src
-
+        
+        
+        CACHE_DIR = Path("./cache")
+        CACHE_DIR.mkdir(exist_ok=True)
+        CACHE_PATH = CACHE_DIR / "rppg_windowized.pt"
+        
+        # ===== 1. 既にキャッシュがある場合は即ロード =====
+        if CACHE_PATH.exists():
+            print(f"⚡ Loading cached dataset from {CACHE_PATH}")
+            pack = torch.load(CACHE_PATH, map_location="cpu")
+            self.X, self.y, self.meta = pack["X"], pack["y"], pack["meta"]
+            print(f"Loaded X={self.X.shape}, y={self.y.shape}")
+            return  # ← これでCSV読み込みをスキップ
+        
+        # ===== 2. なければ通常通りデータ生成 =====
         # ---- 必ずGUIでフォルダ選択 ----
         folders = _pick_or_load_folders()
         ICA_dir   = folders["ICA"]
@@ -324,11 +338,29 @@ class RppgPpgDataset(Dataset):
 
         if len(self.samples) == 0:
             raise RuntimeError("サンプルが0件でした。ID対応や窓設定を確認してください。")
+        
+        X_list, y_list = zip(*self.samples)  # List[(T,5)], List[(T,1)]
+        self.X = torch.from_numpy(np.stack(X_list)).float().contiguous()  # (N, T, 5)
+        self.y = torch.from_numpy(np.stack(y_list)).float().contiguous()  # (N, T, 1)
+        self.meta = {
+            "fs": fs, "win_sec": win_sec, "hop_sec": hop_sec,
+            "allow_txt": allow_txt, "fs_ppg_src": fs_ppg_src,
+            "N_windows": int(self.X.shape[0]),
+            "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        torch.save({"X": self.X, "y": self.y, "meta": self.meta}, CACHE_PATH)
+        print(f"💾 Saved preprocessed dataset to {CACHE_PATH}  (X={self.X.shape}, y={self.y.shape})")
 
     def __len__(self):
+        # ========= ここを変更：テンソルがあればそれを使う =========
+        if self.X is not None:
+            return self.X.shape[0]
         return len(self.samples)
 
     def __getitem__(self, idx):
+        # ========= ここを変更：テンソルがあればそれを使う =========
+        if self.X is not None:
+            return self.X[idx], self.y[idx]
         xs, ys = self.samples[idx]
         return torch.from_numpy(xs), torch.from_numpy(ys)
 
@@ -358,7 +390,7 @@ def train_one_epoch(model, loader, optimizer, device):
         y_hat, w_hat, _ = model(xs) # (B,T,1), (B,T,1)
         # loss = total_loss(y_hat, ys, w_hat, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01)
         # loss = mae(y_hat, ys,w_hat)
-        loss =mae_and_corr(y_hat,ys,1e-8)
+        loss =mae_and_corr(y_hat,ys,1e-8,w_hat)
         optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)

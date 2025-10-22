@@ -116,9 +116,9 @@ def weight_regularizers(w, pi=0.6):
     L_tv  = (w[:,1:] - w[:,:-1]).abs().mean()
     return L_cov, L_tv
 
-def mae_and_corr(y_hat, y, eps=1e-8):
+def mae_and_corr (y_hat, y,w,eps=1e-8):
     
-    mae_loss = mae(y_hat,y,eps=1e-8)
+    mae_loss = mae(y_hat,y,w,eps=1e-8)
     corr_loss = corr_loss(y_hat,y,eps=1e-8)
     
     return (mae_loss+corr_loss)
