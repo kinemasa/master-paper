@@ -17,12 +17,12 @@ def zscore(x):
 df = pd.read_csv(select_file(message="csv"))
 
 # 正規化データ作成
-df["true_ppg_norm"] = zscore(df["true_ppg"])
+# df["true_ppg_norm"] = zscore(df["true_ppg"])
 df["pred_ppg_norm"] = zscore(df["pred_ppg"])
 
 # ---- 時系列プロット（正規化済み） ----
 plt.figure(figsize=(10, 4))
-plt.plot(df["time_sec"], df["true_ppg_norm"], label="True PPG (normalized)", alpha=0.8)
+# plt.plot(df["time_sec"], df["true_ppg_norm"], label="True PPG (normalized)", alpha=0.8)
 plt.plot(df["time_sec"], df["pred_ppg_norm"], label="Predicted PPG (normalized)", alpha=0.8)
 plt.xlabel("Time [sec]")
 plt.ylabel("Normalized Amplitude (0–1)")
