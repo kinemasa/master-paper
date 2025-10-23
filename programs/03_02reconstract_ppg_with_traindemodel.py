@@ -34,15 +34,6 @@ def main():
     OUT_ROOT = Path("./result-trained-model") / EXP_NAME
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-    # ==== データ読み込み ====
-    print("📦 データを読み込みます（JSONでパス指定）")
-    dataset = SingleSubjectDataset(fs_rppg=FS, fs_ppg_src=100)  # ← GUIでJSON or CSV選択が起動
-    X = dataset.X.numpy()  # (T,5)
-    y_true = dataset.y.numpy()  # (T,)
-    subj_id = getattr(dataset, "subject_id", "unknown")
-    roi_name = getattr(dataset, "roi_name", "unknown")
-    print(f"✅ Dataset loaded: X={X.shape}, y={y_true.shape}, subject={subj_id}")
-
     # ==== モデル選択 ====
     print("📄 学習済みモデル(.pth)を選択してください")
     ckpt_path = Path(select_file())
@@ -58,6 +49,19 @@ def main():
     model.load_state_dict(state)
     model.eval()
     print(f"✅ モデルロード完了: {ckpt_path}")
+
+    # ==== データ読み込み ====
+    print("📦 データを読み込みます（JSONでパス指定）")
+    dataset = SingleSubjectDataset(fs_rppg=FS, fs_ppg_src=100)  # ← GUIでJSON or CSV選択が起動
+    X = dataset.X.numpy()  # (T,5)
+    y_true = dataset.y.numpy()  # (T,)
+    subj_id = getattr(dataset, "subject_id", "unknown")
+    roi_name = getattr(dataset, "roi_name", "unknown")
+    print(f"✅ Dataset loaded: X={X.shape}, y={y_true.shape}, subject={subj_id}")
+
+
+
+
 
     # ==== 推論 ====
     with torch.no_grad():
