@@ -47,7 +47,7 @@ def load_signal(filepath: Path):
     num_cols = [c for c in df.columns if df[c].dtype.kind in "fi"]
     if len(num_cols) == 0:
         raise ValueError(f"{filepath} に数値列が見つかりません")
-    val_col = num_cols[0]
+    val_col = num_cols[1]
 
     t = df[time_col].to_numpy(dtype=np.float32) if time_col else None
     v = df[val_col].to_numpy(dtype=np.float32)
