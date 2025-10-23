@@ -358,17 +358,9 @@ class SingleSubjectDataset(Dataset):
 
 
 class batchSubjectDataset(Dataset):
-    """
-    起動時:
-      1) 既存JSONを使うかGUIで確認。
-         → はい: select_file() で JSON 選択 → 各CSVを読み込み。
-         → いいえ: 各CSVを手動で選択 → JSONを自動生成して保存。
-      2) 全チャネルを読み込み・整列し、X:(T,5), y:(T,) として保持。
-      3) ウィンドウ分割は行わない。
-    """
-
     def __init__(self, fs_rppg: int = 30, fs_ppg_src: int = 100,
-                 bp_low: float = 0.7, bp_high: float = 3.0, detrend: bool = True):
+                bp_low: float = 0.7, bp_high: float = 3.0, detrend: bool = True,
+                json_path: 'Path|str|None' = None): 
         self.fs_rppg = fs_rppg
         self.fs_ppg_src = fs_ppg_src
         self.bp_low = bp_low
@@ -379,21 +371,85 @@ class batchSubjectDataset(Dataset):
         self.y: torch.Tensor
         self.meta = {}
         self.paths = {}
-        self.json
-        # === キャッシュ（JSON）読み込みか新規生成か ===
-        
-        json_path = Path(select_file(message="被験者JSONを選択してください"))
-        if not json_path.exists():
-            raise RuntimeError("JSONファイルが見つかりません。")
-        with open(json_path, "r", encoding="utf-8") as f:
-            info = json.load(f)
+        self.subject_id = "unknown"
+        self.roi_name = "unknown"
 
-        self.paths = info["paths"]
-        self.meta = info.get("meta", {})
-        self.subject_id = info.get("subject_id", "unknown")
-        self.roi_name = info.get("roi_name","unknown")
-        print(f"✅ Loaded JSON: {json_path}")
-       
+        # === A) 直指定JSONがあるときはそれを使う ===
+        if json_path is not None:
+            json_path = Path(json_path)
+            if not json_path.exists():
+                raise RuntimeError(f"JSONが見つかりません: {json_path}")
+            with open(json_path, "r", encoding="utf-8") as f:
+                info = json.load(f)
+            self.paths = info["paths"]
+            self.meta = info.get("meta", {})
+            self.subject_id = info.get("subject_id", "unknown")
+            self.roi_name = info.get("roi_name", "unknown")
+            print(f"✅ Loaded JSON (no GUI): {json_path}")
+
+        else:
+            if ask_yes_no("既存の被験者JSON（例: subject_1020.json）を読み込みますか？"):
+                json_path = Path(select_file(message="被験者JSONを選択してください"))
+                if not json_path.exists():
+                    raise RuntimeError("JSONファイルが見つかりません。")
+                with open(json_path, "r", encoding="utf-8") as f:
+                    info = json.load(f)
+                self.paths = info["paths"]
+                self.meta = info.get("meta", {})
+                self.subject_id = info.get("subject_id", "unknown")
+                self.roi_name = info.get("roi_name", "unknown")
+                print(f"✅ Loaded JSON: {json_path}")
+            else:
+                # --- 新規作成 ---
+                print("📄 LGI CSV を選択してください");   f_lgi = Path(select_file())
+                print("📄 POS CSV を選択してください");   f_pos = Path(select_file())
+                print("📄 CHROM CSV を選択してください"); f_chrom = Path(select_file())
+                print("📄 ICA CSV を選択してください");   f_ica = Path(select_file())
+                print("📄 OMIT CSV を選択してください");  f_omit = Path(select_file())
+                print("📄 PPG CSV を選択してください");    f_ppg = Path(select_file())
+
+                self.paths = {
+                    "lgi": str(f_lgi),
+                    "pos": str(f_pos),
+                    "chrom": str(f_chrom),
+                    "ica": str(f_ica),
+                    "omit": str(f_omit),
+                    "ppg": str(f_ppg),
+                }
+
+                # 被験者ID/ROI名の推定
+                try:
+                    import re
+                    f_path = Path(f_lgi)
+                    m = re.search(r"(\d{3,4})", f_path.stem)
+                    self.subject_id = int(m.group(1)) if m else "unknown"
+                    parent_name = f_path.parent.name
+                    self.roi_name = parent_name.split("_", 1)[1] if "_" in parent_name else parent_name
+                except Exception as e:
+                    print("ID/ROI名の抽出中にエラー:", e)
+                    self.subject_id = "unknown"
+                    self.roi_name = "unknown"
+
+                self.meta = {
+                    "fs_rppg": fs_rppg,
+                    "fs_ppg_src": fs_ppg_src,
+                    "bp": [bp_low, bp_high],
+                    "detrend": detrend,
+                }
+
+                # JSON保存（フォルダ作成のバグ修正）
+                out_dir = Path("./subject_json")
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_json = out_dir / Path(f"subject_{self.subject_id}_{self.roi_name}.json")
+                with open(out_json, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {"subject_id": self.subject_id,
+                         "roi_name": self.roi_name,              # ← 抜けてたので保存
+                         "paths": self.paths,
+                         "meta": self.meta},
+                        f, ensure_ascii=False, indent=2
+                    )
+                print(f"💾 Saved JSON: {out_json}")
 
         # === CSVロード ===
         print("📥 Loading signals...")
@@ -404,16 +460,18 @@ class batchSubjectDataset(Dataset):
         df_omit  = load_pulse(Path(self.paths["omit"]))
         df_ppg   = load_ppg_pulse(Path(self.paths["ppg"]))
 
-        # PPGのみ前処理
-        s_lgi =df_lgi["value"].to_numpy(dtype=float)
-        s_pos =df_pos["value"].to_numpy(dtype=float)
-        s_ica =df_ica["value"].to_numpy(dtype=float)
-        s_chrom =df_chrom["value"].to_numpy(dtype=float)
-        s_omit =df_omit["value"].to_numpy(dtype=float)
-        
+        # numpy化
+        s_lgi   = df_lgi["value"].to_numpy(dtype=float)
+        s_pos   = df_pos["value"].to_numpy(dtype=float)
+        s_chrom = df_chrom["value"].to_numpy(dtype=float)
+        s_ica   = df_ica["value"].to_numpy(dtype=float)
+        s_omit  = df_omit["value"].to_numpy(dtype=float)
+
+        # PPGのみ前処理（fs_ppg_src をちゃんと使う）
         s_ppg = df_ppg["value"].to_numpy(dtype=float)
         s_ppg = preprocess_ppg_signal(
-            s_ppg, fs_ppg=100, fs_target=30)
+            s_ppg, fs_ppg=self.fs_ppg_src, fs_target=self.fs_rppg
+        )
 
         # 長さ合わせ
         T = min(map(len, [s_lgi, s_pos, s_chrom, s_ica, s_omit, s_ppg]))
@@ -424,11 +482,10 @@ class batchSubjectDataset(Dataset):
         self.X = torch.from_numpy(X).float()
         self.y = torch.from_numpy(y).float()
 
-        print(f"✅ Data ready: X={self.X.shape}, y={self.y.shape}, subject={self.subject_id}")
+        print(f"✅ Data ready: X={self.X.shape}, y={self.y.shape}, subject={self.subject_id}, roi={self.roi_name}")
 
     def __len__(self):
         return self.X.shape[0]
 
     def __getitem__(self, idx):
-        # 各サンプルは (1時刻, 全5ch) とその y値を返す
         return self.X[idx], self.y[idx]
