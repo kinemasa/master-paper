@@ -98,7 +98,7 @@ def _align_to_reference(ref_t: np.ndarray, t: np.ndarray, v: np.ndarray) -> np.n
 def flatten_to_method_style_before_after(
     root_src: str,
     root_dst: str,
-    methods: List[str] = ("LGI","POS"),
+    methods: List[str] = ("LGI","POS","OMIT","ICA","CHROM"),
 ):
     """
     subject/video/images-*_before|after/rPPG-pulse/{Method}/{ROI}/bandpass_pulse.csv
@@ -229,7 +229,7 @@ def main():
     print("=== 1) まとめ (_1_なし / before-after対応) ===")
     root_src = select_folder("元データ root_src を選択")
     root_dst = select_folder("出力先 root_dst を選択")
-    methods = ["CHORM"]
+    methods = ["LGI","POS","OMIT","ICA","CHROM"]
 
     flatten_to_method_style_before_after(root_src, root_dst, methods=methods)
 

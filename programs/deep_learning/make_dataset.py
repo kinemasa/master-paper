@@ -103,7 +103,7 @@ class RppgPpgDataset(Dataset):
     """
     def __init__(self, *, fs:int, win_sec:int, hop_sec:int,
                  subj_start:Optional[int]=None, subj_end:Optional[int]=None,
-                 omit_ids:Optional[List[int]]=None, allow_txt:bool=False, fs_ppg_src:int=100):
+                 omit_ids:Optional[List[int]]=None, allow_txt:bool=False, fs_ppg_src:int=100,exp_name ="experiment"):
         self.fs = fs; self.win_sec = win_sec; self.hop_sec = hop_sec
         self.fs_ppg_src = fs_ppg_src
         self.X = None; self.y = None
@@ -139,6 +139,26 @@ class RppgPpgDataset(Dataset):
               "ICA", len(idx_ica), "POS", len(idx_pos), "CHROM", len(idx_chrom),
               "LGI", len(idx_lgi), "OMIT", len(idx_omit), "PPG", len(idx_ppg))
         print("交差（範囲フィルタ前）:", len(inter))
+
+        all_ids = set(idx_ica) | set(idx_pos) | set(idx_chrom) | set(idx_lgi) | set(idx_omit) | set(idx_ppg)
+
+                # 欠損状況をチェック
+        missing_info = {}
+        for id_ in all_ids:
+            missing = []
+            if id_ not in idx_ica:   missing.append("ICA")
+            if id_ not in idx_pos:   missing.append("POS")
+            if id_ not in idx_chrom: missing.append("CHROM")
+            if id_ not in idx_lgi:   missing.append("LGI")
+            if id_ not in idx_omit:  missing.append("OMIT")
+            if id_ not in idx_ppg:   missing.append("PPG")
+            if missing:
+                missing_info[id_] = missing
+
+        # 結果表示
+        print("欠損ID一覧（どのフォルダが欠けているか）:")
+        for id_, folders_missing in missing_info.items():
+            print(f"{id_}: 欠損 -> {folders_missing}")
 
         ids = inter
         if (subj_start is not None) and (subj_end is not None):
@@ -191,7 +211,7 @@ class RppgPpgDataset(Dataset):
         if not save_dir:
             raise RuntimeError("キャッシュ保存フォルダの選択がキャンセルされました。")
         save_dir = Path(save_dir)
-        fname = f"rppg_win{win_sec}_hop{hop_sec}_fs{fs}.pt"
+        fname = f"{exp_name}rppg_win{win_sec}_hop{hop_sec}.pt"
         cache_path = save_dir / fname
         torch.save({"X": self.X, "y": self.y, "meta": self.meta}, cache_path)
         print(f"💾 Saved cache: {cache_path}  X={self.X.shape}, y={self.y.shape}")
@@ -237,6 +257,7 @@ class SingleSubjectDataset(Dataset):
             self.paths = info["paths"]
             self.meta = info.get("meta", {})
             self.subject_id = info.get("subject_id", "unknown")
+            self.roi_name = info.get("roi_name","unknown")
             print(f"✅ Loaded JSON: {json_path}")
         else:
             # --- 新規作成 ---
@@ -259,10 +280,24 @@ class SingleSubjectDataset(Dataset):
             # 被験者IDをファイル名から推定
             try:
                 import re
-                m = re.search(r"(\d{3,4})", f_lgi.stem)
+
+                f_path = Path(f_lgi)
+
+                # --- 被験者IDをファイル名から推定 ---
+                m = re.search(r"(\d{3,4})", f_path.stem)
                 self.subject_id = int(m.group(1)) if m else "unknown"
-            except Exception:
+
+                # --- ROI名を親フォルダから抽出 ---
+                parent_name = f_path.parent.name  # 例: "CHROM_right_malar"
+                if "_" in parent_name:
+                    self.roi_name = parent_name.split("_", 1)[1]  # → "right_malar"
+                else:
+                    self.roi_name = parent_name  # "_"がない場合はそのまま
+
+            except Exception as e:
+                print("ID/ROI名の抽出中にエラー:", e)
                 self.subject_id = "unknown"
+                self.roi_name = "unknown"
 
             self.meta = {
                 "fs_rppg": fs_rppg,
@@ -272,7 +307,9 @@ class SingleSubjectDataset(Dataset):
             }
 
             # JSON保存
-            out_json = Path(f"./subject_{self.subject_id}.json")
+            out_dir =("./subject_json")
+            out_json = out_dir / Path(f"./subject_{self.subject_id}_{self.roi_name}.json")
+            # out_json = Path(f"./subject_{self.subject_id}_{self.roi_name}.json")
             with open(out_json, "w", encoding="utf-8") as f:
                 json.dump(
                     {"subject_id": self.subject_id, "paths": self.paths, "meta": self.meta},
