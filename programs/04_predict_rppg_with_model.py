@@ -1,4 +1,4 @@
-# infer_newdata_select_channels.py
+# infer_newdata_select_channels.py（修正版）
 import os
 from pathlib import Path
 import numpy as np
@@ -6,7 +6,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-# ---- あなたの既存モジュール ----
 from myutils.select_folder import select_file
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 
@@ -34,26 +33,25 @@ def load_signal(filepath: Path):
     """time_sec と値列を持つCSV/TXTを読み込み"""
     df = pd.read_csv(filepath, sep=None, engine="python")
     df.columns = [c.strip().lower() for c in df.columns]
-    # 候補列を探す
+
+    # 時間列を探す
     time_col = None
-    val_col = None
     for c in df.columns:
-        if "time" in c:
+        if "time" in c or "sec" in c:
             time_col = c
-        elif "sec" in c and time_col is None:
-            time_col = c
+            break
+
     # 最初の数値列を値として使う
     num_cols = [c for c in df.columns if df[c].dtype.kind in "fi"]
     if len(num_cols) == 0:
         raise ValueError(f"{filepath} に数値列が見つかりません")
-    val_col = num_cols[0] if len(num_cols) == 1 else num_cols[-1]
+    val_col = num_cols[0]
 
     t = df[time_col].to_numpy(dtype=np.float32) if time_col else None
     v = df[val_col].to_numpy(dtype=np.float32)
     return t, v
 
 def zscore_channelwise(X: np.ndarray, eps: float = 1e-8):
-    """チャネルごとに z-score 正規化"""
     Xn = np.zeros_like(X, dtype=np.float32)
     for i in range(X.shape[1]):
         mu = X[:, i].mean()
@@ -64,16 +62,12 @@ def zscore_channelwise(X: np.ndarray, eps: float = 1e-8):
 @torch.no_grad()
 def run_inference_fullseq(model: nn.Module, X5: np.ndarray, fs: int, out_dir: Path,
                           time_sec: np.ndarray | None = None):
-    """
-    X5: shape (T,5) [LGI,POS,CHROM,ICA,OMIT]
-    全長を1回で推論し、pred_fullseq.csvを書き出す
-    """
     model.eval()
     out_dir.mkdir(parents=True, exist_ok=True)
     device = next(model.parameters()).device
 
     Xn = zscore_channelwise(X5)
-    xt = torch.from_numpy(Xn[None, :, :]).to(device)   # (1, T, 5)
+    xt = torch.from_numpy(Xn[None, :, :]).to(device)
 
     y_hat, w_hat, _ = model(xt)
     y_pred = y_hat[0, :, 0].cpu().numpy()
@@ -124,10 +118,12 @@ def main():
     channels = ["LGI", "POS", "CHROM", "ICA", "OMIT"]
     signals = []
     time_ref = None
+    paths = []  # ← ここに実際のPathを保存
 
     for ch in channels:
         print(f"{ch} チャネルのCSV/TXTファイルを選択してください。")
         path = Path(select_file(f"{ch} チャネルファイルを選択"))
+        paths.append(path)
         t, v = load_signal(path)
         print(f"Loaded {ch}: {path.name} ({len(v)} samples)")
         signals.append(v)
@@ -138,8 +134,11 @@ def main():
     min_len = min(len(v) for v in signals)
     X5 = np.stack([v[:min_len] for v in signals], axis=1)
 
+    # ---- 出力フォルダ名を実際のファイル名から作成 ----
+    folder_name = "_".join([p.stem for p in paths])
+    out_dir = OUT_ROOT / folder_name
+
     # ---- 推論 ----
-    out_dir = OUT_ROOT / "_".join([p.stem for p in channels])
     run_inference_fullseq(
         model=model,
         X5=X5,
