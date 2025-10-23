@@ -40,7 +40,7 @@ for new_subject_id in num_subject_ids:
             base_dir = old_path_obj.parent  # fallback
 
         # keyごとのフォルダ名
-        subfolder = f"{key.upper()}-{new_roi_name}"
+        subfolder = f"{key.upper()}_{new_roi_name}"
         new_dir = base_dir / subfolder
 
         # 新しいファイル名
