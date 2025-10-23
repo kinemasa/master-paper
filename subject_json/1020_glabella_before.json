@@ -1,0 +1,21 @@
+{
+  "subject_id": "1020",
+  "roi_name": "glabella_before",
+  "paths": {
+    "lgi": "E:\\dataset\\deep-learning-dataset\\1020.csv",
+    "pos": "E:\\dataset\\deep-learning-dataset\\1020.csv",
+    "chrom": "E:\\dataset\\deep-learning-dataset\\1020.csv",
+    "ica": "E:\\dataset\\deep-learning-dataset\\1020.csv",
+    "omit": "E:\\dataset\\deep-learning-dataset\\1020.csv",
+    "ppg": "E:\\dataset\\deep-learning-dataset\\1020.csv"
+  },
+  "meta": {
+    "fs_rppg": 30,
+    "fs_ppg_src": 100,
+    "bp": [
+      0.7,
+      3.0
+    ],
+    "detrend": true
+  }
+}
