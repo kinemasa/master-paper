@@ -39,14 +39,18 @@ for new_subject_id in num_subject_ids:
         else:
             base_dir = old_path_obj.parent  # fallback
 
-        # keyごとのフォルダ名
-        subfolder = f"{key.upper()}_{new_roi_name}"
+        # ✅ PPGだけはROI名なし、それ以外はROI付きフォルダに
+        if key.lower() == "ppg":
+            subfolder = f"{key.upper()}_before"
+        else:
+            subfolder = f"{key.upper()}_{new_roi_name}"
+
         new_dir = base_dir / subfolder
 
         # 新しいファイル名
         new_filename = f"{new_subject_id}.csv"
 
-        # 新しいフルパス
+        # フルパス
         new_path = str(new_dir / new_filename)
         new_paths[key] = new_path
 
