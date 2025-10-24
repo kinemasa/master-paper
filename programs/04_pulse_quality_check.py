@@ -187,6 +187,69 @@ def plot_quality(ppg, fs, seg_table, keep_ranges, title="PPG Quality (Signal Sim
     plt.legend()
     plt.tight_layout()
     plt.show()
+    
+    
+# ============================================================
+# 9) 包絡線の可視化
+# ============================================================
+def plot_envelope(ppg, fs, title="PPG Envelope"):
+    t = np.arange(len(ppg)) / fs
+    analytic = hilbert(ppg)
+    envelope = np.abs(analytic)
+
+    plt.figure(figsize=(12, 4))
+    plt.plot(t, ppg, label="Filtered PPG", lw=1)
+    plt.plot(t, envelope, "r--", label="Envelope (Hilbert)")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Amplitude")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    return envelope
+
+
+# ============================================================
+# 10) ピーク検出と可視化
+# ============================================================
+def detect_peaks(ppg, fs, prominence=0.1, distance=0.3):
+    """
+    心拍ピークを単純にピークプロミネンスと間隔で検出。
+    """
+    min_distance = int(distance * fs)
+    peaks, _ = find_peaks(ppg, prominence=prominence, distance=min_distance)
+    return peaks
+
+
+def plot_peaks(ppg, fs, peaks, title="PPG Peaks"):
+    t = np.arange(len(ppg)) / fs
+    plt.figure(figsize=(12, 4))
+    plt.plot(t, ppg, lw=1, label="Filtered PPG")
+    plt.plot(peaks / fs, ppg[peaks], "ro", label="Detected Peaks")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Amplitude")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+# ============================================================
+# 11) SDPTG（二次微分）波形可視化
+# ============================================================
+def plot_sdptg(ppg, fs, title="Second Derivative of PPG (SDPTG)"):
+    t = np.arange(len(ppg)) / fs
+    g1 = np.gradient(ppg, 1/fs)
+    g2 = np.gradient(g1, 1/fs)
+    plt.figure(figsize=(12, 4))
+    plt.plot(t, g2, lw=1.0, color="purple", label="SDPTG (2nd derivative)")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Amplitude (a.u.)")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    return g2
 
 
 # ============================================================
@@ -219,3 +282,16 @@ print(f"\n高品質区間 (秒): {keep_ranges}")
 
 # onsetを渡して可視化
 plot_quality(filt, FS, seg_table, keep_ranges, title=f"{TARGET_COLUMN} Quality ({MODE})", onsets=onsets)
+
+# --- 可視化追加 ---
+print("\n=== 波形の各段階を可視化します ===")
+
+# (1) 包絡線
+envelope = plot_envelope(filt, FS, title="Filtered PPG + Envelope")
+
+# (2) ピーク検出
+peaks = detect_peaks(filt, FS, prominence=0.05, distance=0.3)
+plot_peaks(filt, FS, peaks, title="Detected Peaks on Filtered PPG")
+
+# (3) 二次微分波形（SDPTG）
+sdptg = plot_sdptg(filt, FS, title="SDPTG Waveform (2nd Derivative)")
