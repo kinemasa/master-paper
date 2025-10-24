@@ -153,21 +153,29 @@ def waveform_quality_analysis(ppg, fs=FS, n_points=N_POINTS, mode=MODE):
 # ============================================================
 # 7) 可視化
 # ============================================================
-def plot_quality(ppg, fs, seg_table, keep_ranges, title="PPG Quality (Signal Similarity)"):
+def plot_quality(ppg, fs, seg_table, keep_ranges, title="PPG Quality (Signal Similarity)", onsets=None):
     t = np.arange(len(ppg)) / fs
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 7))
 
-    # --- 波形 ---
+    # --- 波形 + onset + 高品質区間 ---
     plt.subplot(2, 1, 1)
     plt.plot(t, ppg, lw=1, label="Filtered PPG")
+
+    # 高品質区間を緑でハイライト
     for s, e in keep_ranges:
         plt.axvspan(s, e, color="lightgreen", alpha=0.3)
+
+    # onset点を赤い縦線で可視化
+    if onsets is not None and len(onsets) > 0:
+        plt.vlines(onsets / fs, ymin=np.min(ppg), ymax=np.max(ppg), color="red", alpha=0.5, lw=1.0, label="Detected Onsets")
+        plt.plot(onsets / fs, ppg[onsets], "ro", markersize=3)
+
     plt.xlabel("Time [s]")
     plt.ylabel("Amplitude")
     plt.title(title)
-    plt.legend()
+    plt.legend(loc="upper right")
 
-    # --- SQI ---
+    # --- SQIプロット ---
     plt.subplot(2, 1, 2)
     mid_t = (seg_table["start_time"] + seg_table["end_time"]) / 2
     plt.plot(mid_t, seg_table["sqi"], "o-", label="SQI (corr of SDPTG)")
@@ -201,8 +209,13 @@ if __name__ == "__main__":
     ppg = df[TARGET_COLUMN].to_numpy()
 
     filt, seg_table, keep_ranges = waveform_quality_analysis(ppg, FS, N_POINTS, MODE)
-    print("\n--- 品質解析結果 ---")
-    print(seg_table.head())
-    print(f"\n高品質区間 (秒): {keep_ranges}")
 
-    plot_quality(filt, FS, seg_table, keep_ranges, title=f"{TARGET_COLUMN} Quality ({MODE})")
+# onsetも可視化用に取得
+onsets = detect_pulse_onsets(filt, FS)
+
+print("\n--- 品質解析結果 ---")
+print(seg_table.head())
+print(f"\n高品質区間 (秒): {keep_ranges}")
+
+# onsetを渡して可視化
+plot_quality(filt, FS, seg_table, keep_ranges, title=f"{TARGET_COLUMN} Quality ({MODE})", onsets=onsets)
