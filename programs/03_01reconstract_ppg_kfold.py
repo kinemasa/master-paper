@@ -5,7 +5,7 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 from deep_learning.make_dataset import RppgPpgDataset
-from deep_learning.make_dataloader import make_loaders
+from deep_learning.make_dataloader import make_loaders_from_indices,split_train_val,make_fold_indices
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
 from deep_learning.evaluation import  mae_corr_loss
 from torch.utils.data import DataLoader, Subset
@@ -175,55 +175,100 @@ def main():
     )
 
     # ===================== Dataloader作成 =====================
-    dl_train, dl_val, dl_test = make_loaders(dataset, batch_size, num_workers, train_ratio, val_ratio)
+    
+    cv_summary_csv = log_root / "cv_summary.csv"
+    if not cv_summary_csv.exists():
+        with open(cv_summary_csv, "w", encoding="utf-8-sig", newline="") as f:
+            csv.writer(f).writerow(["timestamp", "fold", "best_val", "test_loss", "epochs_trained", "lr_last"])
 
-    # ===================== モデル構築 =====================
-    model = ReconstractPPG_with_QaulityHead(
-        input_size=5, lstm_dims=lstm_dims, cnn_hidden=cnn_hidden,
-        drop=dropout).to(device)
+    fold_pairs = make_fold_indices(len(dataset), n_splits=n_splits, seed=seed)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=3, verbose=True
-    )
+    for fold_id, (idx_train_all, idx_test) in enumerate(fold_pairs, start=1):
+        # foldごとの出力先
+        fold_tag = f"fold_{fold_id}"
+        fold_log_root  = log_root  / fold_tag
+        fold_model_dir = model_dir / fold_tag
+        fold_result_dir= result_dir / fold_tag
+        fold_hist_csv  = fold_log_root / "training_log.csv"
+        fold_model_dir.mkdir(parents=True, exist_ok=True)
+        fold_log_root.mkdir(parents=True, exist_ok=True)
+        fold_result_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Dataset total windows: {len(dataset)}")
-    print(f"Train/Val/Test = {len(dl_train.dataset)}, {len(dl_val.dataset)}, {len(dl_test.dataset)}")
+        # train(80%)の中からvalを切り出す（valは学習早期判断/学習率スケジューラ用）
+        idx_train, idx_val = split_train_val(idx_train_all, val_ratio=val_ratio_in_train, seed=seed+fold_id)
 
-    best_val = float("inf")
-    best_state = None
+        # DataLoader作成
+        dl_train, dl_val, dl_test = make_loaders_from_indices(
+            dataset, idx_train, idx_val, idx_test,
+            batch_size=batch_size, num_workers=num_workers, shuffle_train=True
+        )
 
-    # ===================== 学習ループ =====================
-    for epoch in range(1, max_epochs + 1):
-        train = train_one_epoch(model, dl_train, optimizer, device, eps,alpha)
-        val = evaluate(model, dl_val, device,eps,alpha)
-        scheduler.step(val)
-        lr_now = optimizer.param_groups[0]['lr']
-        print(f"[{epoch:03d}] train={train:.4f}  val={val:.4f}  lr={lr_now:.2e}")
+        # モデル・最適化器をfold毎に初期化
+        model = ReconstractPPG_with_QaulityHead(
+            input_size=5, lstm_dims=lstm_dims, cnn_hidden=cnn_hidden, drop=dropout
+        ).to(device)
 
-        with open(hist_csv, "a", encoding="utf-8-sig", newline="") as f:
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=3, verbose=True
+        )
+
+        # 学習ログヘッダ
+        if not fold_hist_csv.exists():
+            with open(fold_hist_csv, "w", encoding="utf-8-sig", newline="") as f:
+                csv.writer(f).writerow(["timestamp", "epoch", "train_loss", "val_loss", "lr"])
+
+        print(f"\n===== {fold_tag} =====")
+        print(f"Train/Val/Test = {len(dl_train.dataset)}, {len(dl_val.dataset)}, {len(dl_test.dataset)}")
+
+        best_val = float("inf")
+        best_state = None
+        epochs_trained = 0
+
+        # ===== 学習ループ（このfold）=====
+        for epoch in range(1, max_epochs + 1):
+            epochs_trained = epoch
+            train = train_one_epoch(model, dl_train, optimizer, device, eps, alpha)
+            # valが無い(=サイズ0)場合はtrainで代替評価
+            val_loss = evaluate(model, dl_val if len(dl_val.dataset) > 0 else dl_train, device, eps, alpha)
+            scheduler.step(val_loss)
+            lr_now = optimizer.param_groups[0]['lr']
+            print(f"[{fold_tag}][{epoch:03d}] train={train:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
+
+            with open(fold_hist_csv, "a", encoding="utf-8-sig", newline="") as f:
+                csv.writer(f).writerow([
+                    datetime.datetime.now().isoformat(timespec="seconds"),
+                    epoch, f"{train:.6f}", f"{val_loss:.6f}", f"{lr_now:.2e}"
+                ])
+
+            if val_loss < best_val:
+                best_val = val_loss
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+        # ===== foldの評価と保存 =====
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        te = evaluate(model, dl_test, device, eps, alpha)
+        print(f"[{fold_tag}][TEST] loss={te:.4f}")
+
+        torch.save(model.state_dict(), fold_model_dir / f"{exp_name}_{fold_tag}.pth")
+        print(f"Saved: {fold_model_dir / f'{exp_name}_{fold_tag}.pth'}")
+
+        # 推定結果を書き出し（fold配下にtrain/val/test別）
+        export_all_predictions(model, dl_train, device, framerate, fold_result_dir, "train")
+        if len(dl_val.dataset) > 0:
+            export_all_predictions(model, dl_val,   device, framerate, fold_result_dir, "val")
+        export_all_predictions(model, dl_test,  device, framerate, fold_result_dir, "test")
+
+        # CVサマリ更新
+        with open(cv_summary_csv, "a", encoding="utf-8-sig", newline="") as f:
             csv.writer(f).writerow([
                 datetime.datetime.now().isoformat(timespec="seconds"),
-                epoch, f"{train:.6f}", f"{val:.6f}", f"{lr_now:.2e}"
+                fold_id, f"{best_val:.6f}", f"{te:.6f}", epochs_trained, f"{optimizer.param_groups[0]['lr']:.2e}"
             ])
 
-        if val < best_val:
-            best_val = val
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-
-    # ===================== 評価と保存 =====================
-    if best_state is not None:
-        model.load_state_dict(best_state)
-    te = evaluate(model, dl_test, device, eps,alpha)
-    print(f"[TEST] loss={te:.4f}")
-
-    torch.save(model.state_dict(), model_path)
-    print(f"Saved: {model_path}")
-
-     # --- 推定結果を全データで書き出し 
-    export_all_predictions(model, dl_train, device, framerate, result_dir, "train")
-    export_all_predictions(model, dl_val,   device, framerate, result_dir, "val")
-    export_all_predictions(model, dl_test,  device, framerate, result_dir, "test")
+    print("\n✅ 5-Fold CV 完了。各foldのログ/モデル/結果は fold_k ディレクトリに出力済み。")
+    
 
 
 if __name__ == "__main__":
