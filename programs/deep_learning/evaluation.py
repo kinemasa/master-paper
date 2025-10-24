@@ -124,7 +124,7 @@ def mae_and_corr (y_hat, y,w,eps=1e-8):
     return (mae_loss+corr_loss)
 
 
-def mae_corr_loss(y_hat, y, alpha=0.8, eps=1e-8):
+def mae_corr_loss(y_hat, y,eps=1e-8,alpha=0.8,):
     # --- MAE ---
     mae = torch.mean(torch.abs(y_hat - y))
 

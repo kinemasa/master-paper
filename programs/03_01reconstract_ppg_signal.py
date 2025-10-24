@@ -19,31 +19,31 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def train_one_epoch(model, loader, optimizer, device,eps,a=0.5):
+def train_one_epoch(model, loader, optimizer, device,eps,alpha=0.5):
     model.train()
     total = 0.0
     for xs, ys in loader:
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
         y_hat, w_hat, _ = model(xs)
-        loss =mae_corr_loss(y_hat, ys,a,eps)
+        loss =mae_corr_loss(y_hat, ys,eps,alpha)
         optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         optimizer.step()
         total += loss.item() * xs.size(0)
     return total / len(loader.dataset)
 
 
 @torch.no_grad()
-def evaluate(model, loader, device,eps):
+def evaluate(model, loader, device,eps,alpha=0.5):
     model.eval()
     total = 0.0
     for xs, ys in loader:
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
         y_hat, w_hat, _ = model(xs)
-        loss =mae_corr_loss(y_hat, ys, w_hat,eps,a=0.5)
+        loss =mae_corr_loss(y_hat, ys,eps,alpha)
         total += loss.item() * xs.size(0)
     return total / len(loader.dataset)
 
@@ -108,24 +108,24 @@ def main():
 
     # Dataset設定
     framerate = 30
-    win_sec = 10 ## 分割データの秒数
-    hop_sec = 10 ## どれだけウィンドウを動かすか
-    subject_search_start = None
-    subject_search_end = None
+    win_sec = 5 ## 分割データの秒数
+    hop_sec = 5 ## どれだけウィンドウを動かすか
+    subject_search_start = 1000
+    subject_search_end = 10000
     remove_ids = [] ##除外する番号
     allow_txt = False ## 基本False
     framerate_ppg = 100
 
     # Loader設定
-    train_ratio = 0.70 
-    val_ratio = 0.15 ##残りがtest
+    train_ratio = 0.60 
+    val_ratio = 0.20 ##残りがtest
     batch_size = 32
     num_workers = 2 #並列データ読み込み数　2でよい
 
     # モデル設定
     lstm_dims = (90, 60, 30)
     cnn_hidden = 32
-    dropout = 0.2
+    dropout = 0.4
     
     # Optimizer設定
     lr = 1e-3
@@ -134,7 +134,7 @@ def main():
 
     # Loss設定 
     eps = 1e-8 #0割防止
-
+    alpha =0.5
     # 出力フォルダ
     log_root = Path("./log") / exp_name
     model_dir = Path("./model") / exp_name
@@ -191,8 +191,8 @@ def main():
 
     # ===================== 学習ループ =====================
     for epoch in range(1, max_epochs + 1):
-        train = train_one_epoch(model, dl_train, optimizer, device, eps)
-        val = evaluate(model, dl_val, device,eps)
+        train = train_one_epoch(model, dl_train, optimizer, device, eps,alpha)
+        val = evaluate(model, dl_val, device,eps,alpha)
         scheduler.step(val)
         lr_now = optimizer.param_groups[0]['lr']
         print(f"[{epoch:03d}] train={train:.4f}  val={val:.4f}  lr={lr_now:.2e}")
@@ -210,7 +210,7 @@ def main():
     # ===================== 評価と保存 =====================
     if best_state is not None:
         model.load_state_dict(best_state)
-    te = evaluate(model, dl_test, device, eps)
+    te = evaluate(model, dl_test, device, eps,alpha)
     print(f"[TEST] loss={te:.4f}")
 
     torch.save(model.state_dict(), model_path)

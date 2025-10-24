@@ -16,9 +16,9 @@ from myutils.select_folder import select_file
 # ============================================================
 # --- 固定パラメータ設定 ---
 # ============================================================
-TARGET_COLUMN = "lgi"   # ← 解析対象列（例: "pred_ppg", "lgi", "pos", "chrom", "ica"）
+TARGET_COLUMN = "pred_ppg"   # ← 解析対象列（例: "pred_ppg", "lgi", "pos", "chrom", "ica"）
 FS = 30.0                    # ← サンプリング周波数 [Hz]
-N_POINTS = 50                # ← 各ビートのリサンプリング点数
+N_POINTS = 30                # ← 各ビートのリサンプリング点数
 MODE = "non-conservative"        # ← or "non-conservative"
 ESS_THRESHOLDS = {"conservative": 0.796, "non-conservative": 0.3}
 # ESS_THRESHOLDS = {"conservative": 0.796, "non-conservative": 0.673}

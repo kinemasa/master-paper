@@ -65,4 +65,4 @@ def plot_ppg_segments(filepath, start_sec=0, end_sec=None, zscore=True):
 # ============ 実行例 ============
 # CSVファイルを指定
 filepath = select_file()  # ←ファイルパスをここに
-plot_ppg_segments(filepath, start_sec=30, end_sec=40)
+plot_ppg_segments(filepath, start_sec=0, end_sec=10)
