@@ -123,8 +123,19 @@ def mae_and_corr (y_hat, y,w,eps=1e-8):
     
     return (mae_loss+corr_loss)
 
-def total_loss(y_hat, y_true, w, lam_corr=0.3, lam_cov=0.1, lam_tv=0.01):
-    L_time = weighted_mae(y_hat, y_true, w)
-    L_corr = weighted_corr_loss(y_hat, y_true, w)
-    L_cov, L_tv = weight_regularizers(w, pi=0.6)
-    return L_time + lam_corr*L_corr + lam_cov*L_cov + lam_tv*L_tv
+
+def mae_corr_loss(y_hat, y, alpha=0.8, eps=1e-8):
+    # --- MAE ---
+    mae = torch.mean(torch.abs(y_hat - y))
+
+    # --- Pearson相関 ---
+    y_hat_c = y_hat - torch.mean(y_hat)
+    y_c = y - torch.mean(y)
+    corr = torch.sum(y_hat_c * y_c) / (
+        torch.sqrt(torch.sum(y_hat_c ** 2) + eps) *
+        torch.sqrt(torch.sum(y_c ** 2) + eps)
+    )
+
+    # --- 総合損失 ---
+    loss = alpha * mae + (1 - alpha) * (1 - corr)
+    return loss

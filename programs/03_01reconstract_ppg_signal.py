@@ -7,7 +7,7 @@ import pandas as pd
 from deep_learning.make_dataset import RppgPpgDataset
 from deep_learning.make_dataloader import make_loaders
 from deep_learning.lstm import ReconstractPPG_with_QaulityHead
-from deep_learning.evaluation import total_loss, mae_and_corr,mae
+from deep_learning.evaluation import  mae_corr_loss
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -19,14 +19,14 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def train_one_epoch(model, loader, optimizer, device,eps):
+def train_one_epoch(model, loader, optimizer, device,eps,a=0.5):
     model.train()
     total = 0.0
     for xs, ys in loader:
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
         y_hat, w_hat, _ = model(xs)
-        loss =mae(y_hat, ys,w_hat,eps)
+        loss =mae_corr_loss(y_hat, ys,a,eps)
         optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -43,7 +43,7 @@ def evaluate(model, loader, device,eps):
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
         y_hat, w_hat, _ = model(xs)
-        loss = mae(y_hat, ys, w_hat,eps)
+        loss =mae_corr_loss(y_hat, ys, w_hat,eps,a=0.5)
         total += loss.item() * xs.size(0)
     return total / len(loader.dataset)
 
@@ -104,7 +104,7 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
 def main():
     # ===================== 設定ここに集約 =====================
-    exp_name = "glallea_before_lstm4_mae"  ## roi-phase-model-loss
+    exp_name = "glallea_before_lstm4_maecorr05"  ## roi-phase-model-loss
 
     # Dataset設定
     framerate = 30
