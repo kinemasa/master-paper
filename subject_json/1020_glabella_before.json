@@ -2,12 +2,12 @@
   "subject_id": "1020",
   "roi_name": "glabella_before",
   "paths": {
-    "lgi": "E:\\dataset\\deep-learning-dataset\\1020.csv",
-    "pos": "E:\\dataset\\deep-learning-dataset\\1020.csv",
-    "chrom": "E:\\dataset\\deep-learning-dataset\\1020.csv",
-    "ica": "E:\\dataset\\deep-learning-dataset\\1020.csv",
-    "omit": "E:\\dataset\\deep-learning-dataset\\1020.csv",
-    "ppg": "E:\\dataset\\deep-learning-dataset\\1020.csv"
+    "lgi": "E:\\dataset\\deep-learning-dataset\\LGI_glabella_before\\1020.csv",
+    "pos": "E:\\dataset\\deep-learning-dataset\\POS_glabella_before\\1020.csv",
+    "chrom": "E:\\dataset\\deep-learning-dataset\\CHROM_glabella_before\\1020.csv",
+    "ica": "E:\\dataset\\deep-learning-dataset\\ICA_glabella_before\\1020.csv",
+    "omit": "E:\\dataset\\deep-learning-dataset\\OMIT_glabella_before\\1020.csv",
+    "ppg": "E:\\dataset\\deep-learning-dataset\\PPG_before\\1020.csv"
   },
   "meta": {
     "fs_rppg": 30,
