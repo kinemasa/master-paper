@@ -360,7 +360,7 @@ if __name__ == "__main__":
     # C) 学習データ生成（窓分割で増強 / 全ファイル対象）
     #    窓長やホップは用途に応じて調整
     WIN = 300
-    HOP = 90
+    HOP = 9
     X_list, Y_list = [], []
     for lgi_path, ppg_path, stem in pairs:
         lgi = load_wave(lgi_path)
