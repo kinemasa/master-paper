@@ -44,6 +44,32 @@ class QualityHead1D(nn.Module):
         h = F.relu(self.conv1(h))     # (B,H,T)
         w = torch.sigmoid(self.conv2(h)).transpose(1, 2)  # -> (B,T,1)
         return w
+    
+class TemporalAttention(nn.Module):
+    """
+    時間方向の自己注意 (Self-Attention)
+    → LSTM出力間で情報を再配分し、欠損区間を補う
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.query = nn.Linear(dim, dim)
+        self.key   = nn.Linear(dim, dim)
+        self.value = nn.Linear(dim, dim)
+        self.scale = dim ** 0.5
+
+    def forward(self, x, mask=None):
+        # x: (B, T, D)
+        Q = self.query(x)
+        K = self.key(x)
+        V = self.value(x)
+        attn = torch.bmm(Q, K.transpose(1, 2)) / self.scale  # (B, T, T)
+
+        if mask is not None:
+            attn = attn.masked_fill(mask == 0, -1e9)
+
+        attn = torch.softmax(attn, dim=-1)
+        out = torch.bmm(attn, V)
+        return out + x  # 残差接続
 
 
 ## =================論文実装LSTM===============================
@@ -84,13 +110,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class ReconstractPPG_with_QaulityHead(nn.Module):
+class ReconstractPPG(nn.Module):
     """
     入力:  x (B,T,C)
     出力:  y_hat (B,T,1) : 推定PPG波形（LSTMのみ）
-           w_hat (B,T,1) : 信頼度(0〜1)（QualityHeadの出力をそのまま採用）
-           w_from_qhead  : 同上（可視化・互換用に返す）
-    融合なし：LSTM特徴とCNN特徴の結合・流用を完全に廃止
     """
     def __init__(self, input_size=4, lstm_dims=(90,60,30), cnn_hidden=32,
                  drop=0.1, combine_quality_with_head=False):
@@ -100,8 +123,6 @@ class ReconstractPPG_with_QaulityHead(nn.Module):
         self.block2 = LSTMBlock(lstm_dims[0], lstm_dims[1], dropout=drop)
         self.block3 = LSTMBlock(lstm_dims[1], lstm_dims[2], dropout=drop)
 
-        # ---- Quality head（wの推定専用。conv1 の流用は行わない）----
-        self.qhead = QualityHead1D(input_size, hidden=cnn_hidden, k=5)
 
         # ---- 出力ヘッド（LSTM出力のみを使用）----
         last_dim = lstm_dims[2]
@@ -118,8 +139,35 @@ class ReconstractPPG_with_QaulityHead(nn.Module):
         # ---------- 出力 ----------
         y_hat = self.y_head(H_lstm)                 # (B,T,1) ← LSTMのみ
 
-        # 品質はQualityHeadから直接（主枝とは非結合）
-        w_from_qhead = self.qhead(x)                # (B,T,1)
-        w_hat = w_from_qhead                        # そのまま採用
 
-        return y_hat, w_hat, w_from_qhead
+        return y_hat
+    
+    class ReconstractPPG_withAttention(nn.Module):
+        """入力:  x (B,T,C)
+        出力:  y_hat (B,T,1) : 推定PPG波形
+        改良点: Temporal Attentionによる動き欠損補完"""
+        def __init__(self, input_size=4, lstm_dims=(90,60,30), drop=0.1):
+            super().__init__()
+
+            # ---- LSTM Stack ----
+            self.block1 = LSTMBlock(input_size,   lstm_dims[0], dropout=drop)
+            self.block2 = LSTMBlock(lstm_dims[0], lstm_dims[1], dropout=drop)
+            self.block3 = LSTMBlock(lstm_dims[1], lstm_dims[2], dropout=drop)
+
+            # ---- Temporal Attention ----
+            self.temporal_attn = TemporalAttention(lstm_dims[2])
+
+            # ---- 出力ヘッド ----
+            self.y_head = nn.Linear(lstm_dims[2], 1)
+
+        def forward(self, x, mask=None):
+            # x: (B,T,C)
+            h = self.block1(x, apply_dropout=True)      # (B,T,90)
+            h = self.block2(h, apply_dropout=True)      # (B,T,60)
+            H_lstm = self.block3(h, apply_dropout=True) # (B,T,30)
+
+            # Attentionによる欠損補完（動き区間を補う）
+            H_refined = self.temporal_attn(H_lstm, mask=mask)  # (B,T,30)
+
+            y_hat = self.y_head(H_refined)  # (B,T,1)
+            return y_hat
