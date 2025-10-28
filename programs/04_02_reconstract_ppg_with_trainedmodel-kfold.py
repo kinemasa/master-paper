@@ -71,7 +71,7 @@ def predict_ensemble(models, X_np: np.ndarray, device="cpu"):
     """
     x_t = torch.from_numpy(X_np).float().unsqueeze(0).to(device)  # (1, T, 5)
 
-    y_list = [], 
+    y_list = []
     for m in models:
         y_hat= m(x_t)          # (1, T, 1), (1, T, 1)
         y = y_hat.squeeze(0).detach().cpu().numpy()[:, 0]   # (T,)
