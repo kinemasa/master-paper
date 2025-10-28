@@ -104,7 +104,7 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
 def main():
     # ===================== 設定ここに集約 =====================
-    exp_name = "glallea_before_lstm4_maecorr05"  ## roi-phase-model-loss
+    exp_name = "glallea_before_lstm5_mae_do2"  ## roi-phase-model-loss
 
     # Dataset設定
     framerate = 30
@@ -127,18 +127,18 @@ def main():
     val_ratio_in_train = 0.20  # ←必要なら0.0にして完全CV(学習のみ+最後にtest)にもできる
 
     # モデル設定
-    lstm_dims = (90, 60, 30)
+    lstm_dims = (120,90, 60, 30)
     cnn_hidden = 32
-    dropout = 0.4
+    dropout = 0.2
     
     # Optimizer設定
     lr = 1e-3
     weight_decay = 1e-4
-    max_epochs = 200
+    max_epochs = 100
 
     # Loss設定 
     eps = 1e-8 #0割防止
-    alpha =0.5
+    alpha =0
     # 出力フォルダ
     log_root = Path("./log") / exp_name
     model_dir = Path("./model") / exp_name
