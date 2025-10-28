@@ -277,6 +277,60 @@ def extract_bp_features_with_quality(csv_file,
 
 
 # ============================================================
+# 可視化: どのビートが品質採用されたかを描く
+# ============================================================
+
+def plot_quality_selection(t, signal_norm, valley_idx, seg_table, fs, save_path=None, title="Quality-selected beats"):
+    """緑=最終採用(final)、黄=品質OKだが他条件NG、赤=品質NG、の帯で可視化。
+    また下段にSQIの推移と閾値線を描く。
+    save_pathにPath/strを渡すとPNG保存。"""
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(12,6))
+
+    # 上: 波形 + 区間帯
+    ax1 = fig.add_subplot(2,1,1)
+    ax1.plot(t, signal_norm, lw=1, label="normalized(Env)")
+
+    # 区間色分け
+    for i,row in seg_table.iterrows():
+        s,e = row["start_time"], row["end_time"]
+        if row["final"]:
+            ax1.axvspan(s, e, color="lightgreen", alpha=0.4)
+        elif row["quality"]:
+            ax1.axvspan(s, e, color="khaki", alpha=0.35)
+        else:
+            ax1.axvspan(s, e, color="lightcoral", alpha=0.3)
+
+    # 凡例用ダミー
+    from matplotlib.patches import Patch
+    patches = [
+        Patch(facecolor="lightgreen", alpha=0.4, label="採用(final)"),
+        Patch(facecolor="khaki", alpha=0.35, label="品質OKだが他条件NG"),
+        Patch(facecolor="lightcoral", alpha=0.3, label="品質NG"),
+    ]
+    ax1.legend(handles=patches, loc="upper right")
+    ax1.set_title(title)
+    ax1.set_xlabel("Time [s]")
+    ax1.set_ylabel("Amplitude (a.u.)")
+
+    # 下: SQI
+    ax2 = fig.add_subplot(2,1,2)
+    mid_t = (seg_table["start_time"] + seg_table["end_time"]) / 2
+    ax2.plot(mid_t, seg_table["sqi"], "o-", label="SQI")
+    ax2.axhline(ESS_THRESHOLDS["conservative"], ls="--", color="r", label="TH(cons)")
+    ax2.axhline(ESS_THRESHOLDS["non-conservative"], ls="--", color="orange", label="TH(non-cons)")
+    ax2.set_ylim(-1,1)
+    ax2.set_xlabel("Time [s]")
+    ax2.set_ylabel("SQI")
+    ax2.legend()
+    fig.tight_layout()
+
+    if save_path is not None:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.show()
+
+
+# ============================================================
 # CLIエントリ
 # ============================================================
 if __name__ == "__main__":
@@ -301,6 +355,34 @@ if __name__ == "__main__":
     save_path = save_dir / (Path(csv_path).stem + "_features.csv")
     df_feat.to_csv(save_path, index=False, encoding="utf-8-sig")
 
+    # 付随CSV: セグメントテーブルも保存
+    seg_csv = save_dir / (Path(csv_path).stem + "_segments.csv")
+    seg_tbl.to_csv(seg_csv, index=False, encoding="utf-8-sig")
+
+    # 可視化PNG保存 + 画面表示
+    # 時刻軸と正規化信号を再構成
+    # extract内のnormは返していないので、ここで再計算
+    df_in = pd.read_csv(csv_path)
+    sig_src = None
+    for cand in ["pred_ppg","true_ppg","lgi","pos","chrom","ica", df_in.columns[1]]:
+        if cand in df_in.columns:
+            sig_src = df_in[cand].to_numpy().astype(float)
+            break
+    if sig_src is not None:
+        sig_f = bandpass_ppg(sig_src, FS)
+        sig_n, _ = normalize_by_envelope(sig_f)
+        t = np.arange(len(sig_n)) / FS
+        # valleyを復元するため、軽くピーク検出
+        _, valley_idx = detect_pulse_peak(sig_n, FS)
+        # 可視化
+        fig_path = save_dir / (Path(csv_path).stem + "_quality_selection.png")
+        plot_quality_selection(t, sig_n, valley_idx, seg_tbl, FS, save_path=fig_path)
+
     print("=== 抽出特徴量 ===")
     print(df_feat.to_string(index=False))
-    print(f"\n✅ 保存: {save_path}")
+    print(f"✅ 特徴CSV: {save_path}")
+    print(f"✅ セグメントCSV: {seg_csv}")
+    if 'fig_path' in locals():
+        print(f"✅ 可視化PNG: {fig_path}")
+    else:
+        print("ℹ️ 可視化PNGは元列の推定に失敗したためスキップしました。")
