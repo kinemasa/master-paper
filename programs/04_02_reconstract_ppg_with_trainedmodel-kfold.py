@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from myutils.select_folder import select_folder, select_file
-from deep_learning.lstm import ReconstractPPG_with_QaulityHead
+from deep_learning.lstm import ReconstractedPPG_Net,ReconstractPPG_withAttention
 from deep_learning.make_dataset import batchSubjectDataset
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -24,7 +24,6 @@ def ask_yes_no(msg: str) -> bool:
 def load_fold_models(model_dir: Path,
                      input_size=5,
                      lstm_dims=(90,60,30),
-                     cnn_hidden=32,
                      drop=0.2,
                      device="cpu"):
     """
@@ -44,10 +43,9 @@ def load_fold_models(model_dir: Path,
 
     models, used_paths = [], []
     for ckpt in fold_ckpts:
-        model = ReconstractPPG_with_QaulityHead(
+        model = ReconstractPPG_withAttention(
             input_size=input_size,
             lstm_dims=lstm_dims,
-            cnn_hidden=cnn_hidden,
             drop=drop
         ).to(device)
         state = torch.load(ckpt, map_location=device)
@@ -69,31 +67,26 @@ def predict_ensemble(models, X_np: np.ndarray, device="cpu"):
     各foldモデルで推論 → 平均。個別出力も返す。
     戻り:
       y_mean      : (T,)
-      w_mean      : (T,)
       y_by_fold   : list of (T,)
-      w_by_fold   : list of (T,)
     """
     x_t = torch.from_numpy(X_np).float().unsqueeze(0).to(device)  # (1, T, 5)
 
-    y_list, w_list = [], []
+    y_list = [], 
     for m in models:
-        y_hat, w_hat, _ = m(x_t)          # (1, T, 1), (1, T, 1)
+        y_hat= m(x_t)          # (1, T, 1), (1, T, 1)
         y = y_hat.squeeze(0).detach().cpu().numpy()[:, 0]   # (T,)
-        w = w_hat.squeeze(0).detach().cpu().numpy()[:, 0]   # (T,)
         y_list.append(y)
-        w_list.append(w)
+        
 
     y_stack = np.stack(y_list, axis=0)  # (F, T)
-    w_stack = np.stack(w_list, axis=0)  # (F, T)
     y_mean = np.mean(y_stack, axis=0)   # (T,)
-    w_mean = np.mean(w_stack, axis=0)   # (T,)
-    return y_mean, w_mean, y_list, w_list
+    return y_mean,y_list
 
 
 def main():
     # ==== 推論パラメータ ====
-    EXP_NAME   = "glallea_before_lstm5_corr_kfold_infer"
-    LSTM_DIMS  = (120,90, 60, 30)
+    EXP_NAME   = "glallea_before_lstm5_attention_kfold_infer"
+    LSTM_DIMS  = (120,90, 60)
     CNN_HIDDEN = 32
     DROPOUT    = 0.2
     FS         = 30   # rPPGのフレームレート（学習時に合わせる）
@@ -113,7 +106,6 @@ def main():
         model_dir=model_root,
         input_size=5,
         lstm_dims=LSTM_DIMS,
-        cnn_hidden=CNN_HIDDEN,
         drop=DROPOUT,
         device=device
     )
@@ -143,7 +135,7 @@ def main():
             print(f"✅ Dataset loaded: X={X.shape}, y={y_true.shape}, subject={subj_id}, roi={roi_name}")
 
             # k-foldアンサンブル推論（フル長）
-            y_pred_mean, q_mean, y_by_fold, q_by_fold = predict_ensemble(models, X, device=device)
+            y_pred_mean, y_by_fold = predict_ensemble(models, X, device=device)
 
             # 出力
             T = X.shape[0]
@@ -152,7 +144,6 @@ def main():
                 "time_sec": t,
                 "true_ppg": y_true,
                 "pred_ppg_mean": y_pred_mean,
-                "quality_mean": q_mean,
                 "lgi": X[:, 0],
                 "pos": X[:, 1],
                 "chrom": X[:, 2],
@@ -160,9 +151,8 @@ def main():
                 "omit": X[:, 4],
             }
             if SAVE_INDIVIDUAL_FOLDS:
-                for i, (y_f, q_f) in enumerate(zip(y_by_fold, q_by_fold), start=1):
+                for  i,y_f in enumerate (y_by_fold):
                     out_dict[f"pred_ppg_f{i}"] = y_f
-                    out_dict[f"quality_f{i}"]  = q_f
 
             df_out = pd.DataFrame(out_dict)
 
