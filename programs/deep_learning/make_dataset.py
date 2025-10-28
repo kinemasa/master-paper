@@ -74,13 +74,13 @@ def load_pulse(filepath: Path):
         return None
 
 def preprocess_ppg_signal(ppg_signal: np.ndarray, fs_ppg: int = 100, fs_target: int = 30) -> np.ndarray:
-    ppg_ds = resample_poly(ppg_signal, up=3, down=10, window=('kaiser', 5.0))
+    ppg_ds = resample_poly(ppg_signal, up=3, down=10, window=('kaiser', 2.0))
     try:
         ppg_dt = detrend_pulse(ppg_ds, sample_rate=fs_target)
     except Exception:
         from scipy.signal import detrend
         ppg_dt = detrend(ppg_ds)
-    ppg_bp = bandpass_filter_pulse(ppg_dt, band_width=[0.1, 15.0], sample_rate=fs_target)
+    ppg_bp = bandpass_filter_pulse(ppg_dt, band_width=[0.1, 12.0], sample_rate=fs_target)
     ppg_bp = -ppg_bp
     return ppg_bp.astype(np.float32)
 

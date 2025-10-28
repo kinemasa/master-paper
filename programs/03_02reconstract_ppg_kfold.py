@@ -104,12 +104,12 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
 def main():
     # ===================== 設定ここに集約 =====================
-    exp_name = "glallea_before_lstm5_mae_do2"  ## roi-phase-model-loss
+    exp_name = "glallea_before_lstm5_onlymse_do2-10sec"  ## roi-phase-model-loss
 
     # Dataset設定
     framerate = 30
-    win_sec = 5 ## 分割データの秒数
-    hop_sec = 5 ## どれだけウィンドウを動かすか
+    win_sec = 10 ## 分割データの秒数
+    hop_sec = 10 ## どれだけウィンドウを動かすか
     subject_search_start = 1000
     subject_search_end = 10000
     remove_ids = [] ##除外する番号
@@ -138,7 +138,7 @@ def main():
 
     # Loss設定 
     eps = 1e-8 #0割防止
-    alpha =0
+    alpha =1
     # 出力フォルダ
     log_root = Path("./log") / exp_name
     model_dir = Path("./model") / exp_name
