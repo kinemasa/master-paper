@@ -123,7 +123,7 @@ def get_representative_features(csv_file,sample_rate,resampling_rate,margin_ppg,
 
 def main():
     input_csv_file = select_file(message="ファイルを選択してください")
-    sampling_rate = 90
+    sampling_rate = 30
     resampling_rate = 90
     margin_ppg = 0
     margin_dppg =3
