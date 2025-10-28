@@ -80,7 +80,7 @@ def preprocess_ppg_signal(ppg_signal: np.ndarray, fs_ppg: int = 100, fs_target: 
     except Exception:
         from scipy.signal import detrend
         ppg_dt = detrend(ppg_ds)
-    ppg_bp = bandpass_filter_pulse(ppg_dt, band_width=[0.1, 10.0], sample_rate=fs_target)
+    ppg_bp = bandpass_filter_pulse(ppg_dt, band_width=[0.1, 15.0], sample_rate=fs_target)
     ppg_bp = -ppg_bp
     return ppg_bp.astype(np.float32)
 
