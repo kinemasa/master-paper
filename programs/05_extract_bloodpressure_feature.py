@@ -151,14 +151,10 @@ def extract_bp_features_with_quality(csv_file,
     # --- 入力読み込み ---
     df = pd.read_csv(csv_file)
     # 列名の自動推定: よく使う候補
-    for cand in ["pred_ppg", "true_ppg", "lgi", "pos", "chrom", "ica", df.columns[1]]:
-        if cand in df.columns:
-            sig = df[cand].to_numpy().astype(float)
-            target_col = cand
-            break
-    else:
-        raise ValueError("PPG列が見つかりません (pred_ppg/true_ppg/lgi/pos/chrom/ica 等)")
-
+    if "pred_ppg_mean" not in df.columns:
+        raise ValueError("❌ CSVに 'pred_ppg_mean' 列が見つかりません。")
+    sig = df["pred_ppg_mean"].to_numpy().astype(float)
+    target_col = "pred_ppg_mean"
     # --- フィルタ & 包絡線正規化 ---
     filt = bandpass_ppg(sig, fs)
     norm, env = normalize_by_envelope(filt)
