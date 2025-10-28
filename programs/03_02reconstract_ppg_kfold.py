@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from deep_learning.make_dataset import RppgPpgDataset
 from deep_learning.make_dataloader import make_loaders_from_indices,split_train_val,make_fold_indices
-from deep_learning.lstm import ReconstractPPG_with_QaulityHead
+from deep_learning.lstm import ReconstractPPG,ReconstractPPG_withAttention
 from deep_learning.evaluation import  mae_corr_loss
 from torch.utils.data import DataLoader, Subset
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -25,7 +25,7 @@ def train_one_epoch(model, loader, optimizer, device,eps,alpha=0.5):
     for xs, ys in loader:
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
-        y_hat, w_hat, _ = model(xs)
+        y_hat = model(xs)
         loss =mae_corr_loss(y_hat, ys,eps,alpha)
         optimizer.zero_grad()
         loss.backward()
@@ -42,7 +42,7 @@ def evaluate(model, loader, device,eps,alpha=0.5):
     for xs, ys in loader:
         xs = xs.to(device, non_blocking=True)
         ys = ys.to(device, non_blocking=True)
-        y_hat, w_hat, _ = model(xs)
+        y_hat = model(xs)
         loss =mae_corr_loss(y_hat, ys,eps,alpha)
         total += loss.item() * xs.size(0)
     return total / len(loader.dataset)
@@ -63,7 +63,7 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
     for xs, ys in loader:
         xs = xs.to(device)                      # (B, T, C=5)
         ys = ys.to(device)                      # (B, T, 1)
-        y_hat, w_hat, _ = model(xs)             # (B, T, 1), (B, T, 1)
+        y_hat = model(xs)             # (B, T, 1), (B, T, 1)
 
         B, T, _ = y_hat.shape
         for i in range(B):
@@ -72,7 +72,6 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
             # 教師・予測・品質
             y_true = ys[i, :, 0].cpu().numpy()
             y_pred = y_hat[i, :, 0].cpu().numpy()
-            w      = w_hat[i, :, 0].cpu().numpy()
 
             # 入力5チャネル（順序: LGI, POS, CHROM, ICA, OMIT）
             X_win = xs[i].cpu().numpy()         # (T, 5)
@@ -88,7 +87,6 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
                 "time_sec": t,
                 "true_ppg": y_true,
                 "pred_ppg": y_pred,
-                "quality": w,
                 "lgi": lgi,
                 "pos": pos,
                 "chrom": chrom,
@@ -104,7 +102,7 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
 def main():
     # ===================== 設定ここに集約 =====================
-    exp_name = "glallea_before_lstm5_onlymse_do2-10sec"  ## roi-phase-model-loss
+    exp_name = "glallea_before_lstm-attention_onlymse_do2-10sec"  ## roi-phase-model-loss
 
     # Dataset設定
     framerate = 30
@@ -127,7 +125,7 @@ def main():
     val_ratio_in_train = 0.20  # ←必要なら0.0にして完全CV(学習のみ+最後にtest)にもできる
 
     # モデル設定
-    lstm_dims = (120,90, 60, 30)
+    lstm_dims = (120,90, 60)
     cnn_hidden = 32
     dropout = 0.2
     
@@ -204,8 +202,8 @@ def main():
         )
 
         # モデル・最適化器をfold毎に初期化
-        model = ReconstractPPG_with_QaulityHead(
-            input_size=5, lstm_dims=lstm_dims, cnn_hidden=cnn_hidden, drop=dropout
+        model = ReconstractPPG_withAttention(
+            input_size=5, lstm_dims=lstm_dims, drop=dropout
         ).to(device)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)

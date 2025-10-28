@@ -142,7 +142,7 @@ class ReconstractPPG(nn.Module):
 
         return y_hat
     
-    class ReconstractPPG_withAttention(nn.Module):
+class ReconstractPPG_withAttention(nn.Module):
         """入力:  x (B,T,C)
         出力:  y_hat (B,T,1) : 推定PPG波形
         改良点: Temporal Attentionによる動き欠損補完"""
