@@ -279,22 +279,22 @@ def visualize_all_derivatives_each_beat(norm_signal, valley_idx, fs=30.0, n_poin
             if len(after_c)>0: d=after_c[0]
             after_d = peaks[peaks>(d if d is not None else c)]
             if len(after_d)>0: e=after_d[0]
+    
+        fig, axes = plt.subplots(2, 2, figsize=(10, 6))    
+        axes = axes.ravel()  # 2×2 → 1次元配列化して扱いやすく
+        fig.suptitle(f"Beat {i+1}/{n_beats} : PPG & its derivatives", y=1.03)
 
-        # ---- プロット（4段）----
-        fig, axes = plt.subplots(2, 2, figsize=(10, 6), sharex=True)
-        fig.suptitle(f"Beat {i+1}/{n_beats} : PPG & its derivatives", y=1.02)
-
-        # PPG
+        # 0: PPG
         axes[0].plot(t_norm, ppg_rs_z, color="black")
-        axes[0].set_ylabel("PPG")
+        axes[0].set_title("PPG (normalized)")
         axes[0].grid(alpha=0.3)
 
-        # DPPG
+        # 1: 一次微分
         axes[1].plot(t_norm, dppg_z, color="blue")
-        axes[1].set_ylabel("1st der.")
+        axes[1].set_title("1st derivative (DPPG)")
         axes[1].grid(alpha=0.3)
 
-        # SDPTG（a-e点マーカー表示）
+        # 2: 二次微分（a〜e点マーカー）
         axes[2].plot(t_norm, sdptg_z, color="red", lw=1.5)
         axes[2].axhline(0, color="k", lw=0.8, alpha=0.5)
         def mark(ax, idx, label, color):
@@ -305,19 +305,22 @@ def visualize_all_derivatives_each_beat(norm_signal, valley_idx, fs=30.0, n_poin
         mark(axes[2], c,"c","green")
         mark(axes[2], d,"d","purple")
         mark(axes[2], e,"e","orange")
-        axes[2].legend(loc="upper right")
-        axes[2].set_ylabel("2nd der. (SDPTG)")
+        axes[2].set_title("2nd derivative (SDPTG)")
+        axes[2].legend(loc="upper right", fontsize=8)
         axes[2].grid(alpha=0.3)
 
-        # 3rd derivative
+        # 3: 三次微分
         axes[3].plot(t_norm, tdptg_z, color="magenta")
-        axes[3].set_ylabel("3rd der.")
-        axes[3].set_xlabel("Normalized time (0-1)")
+        axes[3].set_title("3rd derivative")
         axes[3].grid(alpha=0.3)
+
+        # 軸ラベル調整
+        for ax in axes:
+            ax.set_xlabel("Normalized time (0-1)")
+            ax.set_ylabel("Amplitude (z-score)")
 
         plt.tight_layout()
         plt.show()
-
         if pause > 0:
             plt.pause(pause)
 
