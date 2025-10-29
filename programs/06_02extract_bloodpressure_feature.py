@@ -223,6 +223,104 @@ def visualize_waveform_with_features(norm_signal,valley_idx,df_perbeat,seg_table
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
 
+def visualize_all_derivatives_each_beat(norm_signal, valley_idx, fs=30.0, n_points=80, pause=0.0):
+    """
+    各拍ごとに PPG, 一次微分, 二次微分, 三次微分 を同時に可視化し、
+    二次微分上に a,b,c,d,e点をマーカー表示する。
+
+    Parameters
+    ----------
+    norm_signal : np.ndarray
+        正規化PPG波形
+    valley_idx : list[int]
+        ビート境界インデックス
+    fs : float
+        サンプリング周波数
+    n_points : int
+        各ビートをリサンプリングする点数
+    pause : float
+        自動で次に進めるときの待機時間（秒）
+    """
+
+    n_beats = len(valley_idx) - 1
+    t_norm = np.linspace(0, 1, n_points)
+
+    for i in range(n_beats):
+        s, e = valley_idx[i], valley_idx[i+1]
+        seg = norm_signal[s:e]
+        if len(seg) < 5:
+            continue
+
+        # ---- リサンプリング ----
+        f = interp1d(np.linspace(0,1,len(seg)), seg, kind="cubic")
+        ppg_rs = f(t_norm)
+
+        # ---- 微分系列 ----
+        dppg  = np.gradient(ppg_rs)
+        sdptg = np.gradient(dppg)
+        tdptg = np.gradient(sdptg)  # 三次微分（jerk）
+
+        # ---- 標準化（比較しやすく） ----
+        def z(x): return (x - np.mean(x)) / (np.std(x)+1e-8)
+        ppg_rs_z, dppg_z, sdptg_z, tdptg_z = map(z, [ppg_rs, dppg, sdptg, tdptg])
+
+        # ---- a,b,c,d,e点検出（二次微分上で） ----
+        peaks, _ = find_peaks(sdptg_z, distance=5)
+        troughs, _ = find_peaks(-sdptg_z, distance=5)
+        a=b=c=d=e=None
+        if len(peaks)>0:
+            a = peaks[0]
+            if len(troughs)>0:
+                after_a = troughs[troughs>a]
+                if len(after_a)>0: b=after_a[0]
+            after_b = peaks[peaks>(b if b is not None else a)]
+            if len(after_b)>0: c=after_b[0]
+            after_c = troughs[troughs>(c if c is not None else a)]
+            if len(after_c)>0: d=after_c[0]
+            after_d = peaks[peaks>(d if d is not None else c)]
+            if len(after_d)>0: e=after_d[0]
+
+        # ---- プロット（4段）----
+        fig, axes = plt.subplots(4, 1, figsize=(9, 7), sharex=True)
+        fig.suptitle(f"Beat {i+1}/{n_beats} : PPG & its derivatives", y=1.02)
+
+        # PPG
+        axes[0].plot(t_norm, ppg_rs_z, color="black")
+        axes[0].set_ylabel("PPG")
+        axes[0].grid(alpha=0.3)
+
+        # DPPG
+        axes[1].plot(t_norm, dppg_z, color="blue")
+        axes[1].set_ylabel("1st der.")
+        axes[1].grid(alpha=0.3)
+
+        # SDPTG（a-e点マーカー表示）
+        axes[2].plot(t_norm, sdptg_z, color="red", lw=1.5)
+        axes[2].axhline(0, color="k", lw=0.8, alpha=0.5)
+        def mark(ax, idx, label, color):
+            if idx is not None and 0 <= idx < len(sdptg_z):
+                ax.scatter(t_norm[idx], sdptg_z[idx], color=color, s=40, label=label, zorder=3)
+        mark(axes[2], a,"a","red")
+        mark(axes[2], b,"b","blue")
+        mark(axes[2], c,"c","green")
+        mark(axes[2], d,"d","purple")
+        mark(axes[2], e,"e","orange")
+        axes[2].legend(loc="upper right")
+        axes[2].set_ylabel("2nd der. (SDPTG)")
+        axes[2].grid(alpha=0.3)
+
+        # 3rd derivative
+        axes[3].plot(t_norm, tdptg_z, color="magenta")
+        axes[3].set_ylabel("3rd der.")
+        axes[3].set_xlabel("Normalized time (0-1)")
+        axes[3].grid(alpha=0.3)
+
+        plt.tight_layout()
+        plt.show()
+
+        if pause > 0:
+            plt.pause(pause)
+
 def visualize_sdptg_each_beat(norm_signal, valley_idx, fs=30.0, n_points=80, pause=0.0):
     """
     各拍のSDPTG波形を1つずつ描画し、a,b,c,d,e点をマーカー表示する。
@@ -338,12 +436,17 @@ def extract_bp_features_with_quality(csv_path, fs=FS, resampling_rate=RESAMPLING
     
     # --- 品質合格ビートだけを可視化 ---
     final_idx = np.where(quality_mask)[0]
+    
+    final_idx = np.where(quality_mask)[0]
     if len(final_idx) > 0:
-        # 採用ビートの valley 区間だけ抽出（最後の谷も含む）
+        # 合格ビートの valley 区間のみ
         valley_sel = [valley_idx[i] for i in np.append(final_idx, final_idx[-1]+1) if i < len(valley_idx)]
-        visualize_sdptg_each_beat(norm, valley_sel, fs=fs, n_points=80)
+
+        # --- 各拍のPPG・微分波形を4段で表示 ---
+        visualize_all_derivatives_each_beat(norm, valley_sel, fs=fs, n_points=80)
+
     else:
-        print("⚠️ 品質合格ビートがありません。SDPTG個別表示をスキップします。")
+        print("⚠️ 品質合格ビートがありません。微分波形の可視化をスキップします。")
     df_perbeat, feat_mean, names_all = compute_features_perbeat(norm,valley_idx,final_idx,fs,resampling_rate)
     
     # SQIテーブル
