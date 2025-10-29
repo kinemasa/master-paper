@@ -18,7 +18,7 @@ def plot_ppg_segments(filepath, start_sec=0, end_sec=None, zscore=True):
 
     # z-score 正規化（全体 or 範囲内）
     if zscore:
-        for col in ["pred_ppg", "true_ppg", "lgi","pos","ica","chrom"]:
+        for col in ["pred_ppg_mean", "true_ppg", "lgi","pos","ica","chrom"]:
             mean = df_range[col].mean()
             std = df_range[col].std()
             df_range[col] = (df_range[col] - mean) / (std if std != 0 else 1)
@@ -28,7 +28,7 @@ def plot_ppg_segments(filepath, start_sec=0, end_sec=None, zscore=True):
     fig.suptitle(f"PPG Signals ({'z-score normalized' if zscore else 'raw'})\n{start_sec:.2f}s to {end_sec:.2f}s", fontsize=14)
 
     # 1. pred_ppg
-    axes[0].plot(df_range["time_sec"], df_range["pred_ppg"], color="tab:blue")
+    axes[0].plot(df_range["time_sec"], df_range["pred_ppg_mean"], color="tab:blue")
     axes[0].set_ylabel("Pred PPG (z)")
     axes[0].grid(True, linestyle="--", alpha=0.5)
 
@@ -65,4 +65,4 @@ def plot_ppg_segments(filepath, start_sec=0, end_sec=None, zscore=True):
 # ============ 実行例 ============
 # CSVファイルを指定
 filepath = select_file()  # ←ファイルパスをここに
-plot_ppg_segments(filepath, start_sec=0, end_sec=10)
+plot_ppg_segments(filepath, start_sec=0, end_sec=60)
