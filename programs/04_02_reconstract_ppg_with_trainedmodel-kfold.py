@@ -85,7 +85,7 @@ def predict_ensemble(models, X_np: np.ndarray, device="cpu"):
 
 def main():
     # ==== 推論パラメータ ====
-    EXP_NAME   = "glallea_before_lstm5_attention_kfold_infer"
+    EXP_NAME   = "glallea_before_lstm5_notattention_kfold_infer"
     LSTM_DIMS  = (120,90, 60)
     CNN_HIDDEN = 32
     DROPOUT    = 0.2
