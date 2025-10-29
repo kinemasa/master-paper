@@ -219,6 +219,81 @@ def visualize_waveform_with_features(norm_signal,valley_idx,df_perbeat,seg_table
     ax.set_xlabel("Time [s]"); ax.set_ylabel("Amplitude")
     ax.set_title(f"Waveform + {feature_name} overlay")
     plt.tight_layout(); plt.show()
+    
+def visualize_sdptg_per_beat(norm_signal, valley_idx, fs=30.0, n_points=80, zscore=True):
+    """
+    各ビート区間の二次微分波形(SDPTG)を可視化する
+
+    Parameters
+    ----------
+    norm_signal : np.ndarray
+        正規化済みPPG波形
+    valley_idx : list[int]
+        ビート区切り（谷）インデックス
+    fs : float
+        サンプリング周波数
+    n_points : int
+        各ビートをリサンプリングする点数
+    zscore : bool
+        各ビートごとに標準化して比較しやすくするか
+    """
+
+    from scipy.interpolate import interp1d
+
+    # 1️⃣ ビートごとに切り出し＋リサンプリング
+    beats_rs = []
+    for s, e in zip(valley_idx[:-1], valley_idx[1:]):
+        seg = norm_signal[s:e]
+        if len(seg) < 3:
+            beats_rs.append(None)
+            continue
+        src = np.linspace(0, 1, len(seg))
+        dst = np.linspace(0, 1, n_points)
+        f = interp1d(src, seg, kind="cubic")
+        seg_rs = f(dst)
+
+        # 2️⃣ 二次微分（SDPTG）
+        g1 = np.gradient(seg_rs)
+        sdptg = np.gradient(g1)
+
+        # 3️⃣ 標準化
+        if zscore:
+            sdptg = (sdptg - np.mean(sdptg)) / (np.std(sdptg) + 1e-8)
+        beats_rs.append(sdptg)
+
+    # Noneを除外
+    beats_rs = [b for b in beats_rs if b is not None]
+    if len(beats_rs) == 0:
+        raise ValueError("有効なビートがありません。")
+
+    # 4️⃣ 配列化
+    mat = np.vstack(beats_rs)  # shape = (n_beats, n_points)
+
+    # 5️⃣ 可視化
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+    im = ax.imshow(mat, aspect="auto", cmap="RdBu_r", origin="lower",
+                   extent=[0, 1, 0, len(beats_rs)])
+    ax.set_xlabel("Normalized phase within beat")
+    ax.set_ylabel("Beat index")
+    ax.set_title("Per-beat SDPTG (2nd derivative of PPG)")
+    plt.colorbar(im, ax=ax, label="Normalized amplitude")
+    plt.tight_layout()
+    plt.show()
+
+    # 6️⃣ 平均波形も重ねて確認
+    plt.figure(figsize=(10,4))
+    for i,b in enumerate(beats_rs):
+        plt.plot(np.linspace(0,1,n_points), b, color="gray", alpha=0.3)
+    plt.plot(np.linspace(0,1,n_points), np.nanmean(mat,axis=0), color="red", lw=2, label="mean")
+    plt.title("Per-beat SDPTG (each + mean)")
+    plt.xlabel("Normalized time in beat")
+    plt.ylabel("SDPTG (z-scored)")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    return mat
+
 
 
 # ============================================================
@@ -236,26 +311,11 @@ def extract_bp_features_with_quality(csv_path, fs=FS, resampling_rate=RESAMPLING
     dppg  = np.gradient(norm)
     sdptg = np.gradient(dppg)
     t = np.arange(len(norm)) / fs
-
-    fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
-    axes[0].plot(t, norm, color="black", label="Normalized PPG")
-    axes[0].set_ylabel("PPG")
-    axes[0].legend(loc="upper right")
-
-    axes[1].plot(t, dppg, color="blue", label="First derivative (DPPG)")
-    axes[1].set_ylabel("dPPG")
-    axes[1].legend(loc="upper right")
-
-    axes[2].plot(t, sdptg, color="red", label="Second derivative (SDPTG)")
-    axes[2].set_ylabel("SDPTG")
-    axes[2].set_xlabel("Time [s]")
-    axes[2].legend(loc="upper right")
-
-    plt.suptitle("PPG and its derivatives")
-    plt.tight_layout()
-    plt.show()
     
     peak_idx, valley_idx = detect_pulse_peak(norm, fs)
+    
+    # --- 各ビートごとの二次微分波形を可視化 ---
+    visualize_sdptg_per_beat(norm, valley_idx, fs=fs, n_points=80)
     if len(valley_idx)<3: raise ValueError("谷が少なすぎます。")
 
     sqi_ppg = calc_sqi_from_valleys(norm,valley_idx,mode="ppg")
