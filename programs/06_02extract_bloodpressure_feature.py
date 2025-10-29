@@ -332,12 +332,18 @@ def extract_bp_features_with_quality(csv_path, fs=FS, resampling_rate=RESAMPLING
     mask_sdptg = classify_quality(sqi_sdptg, mode)
     quality_mask = mask_ppg & mask_sdptg
     
-    # --- 各拍のSDPTGを順に表示 ---
-    visualize_sdptg_each_beat(norm, valley_idx, fs=fs, n_points=80)
+
 
     visualize_sqi_selection(norm,valley_idx,fs,mode="sdptg",th=ESS_THRESHOLDS[mode])
     
+    # --- 品質合格ビートだけを可視化 ---
     final_idx = np.where(quality_mask)[0]
+    if len(final_idx) > 0:
+        # 採用ビートの valley 区間だけ抽出（最後の谷も含む）
+        valley_sel = [valley_idx[i] for i in np.append(final_idx, final_idx[-1]+1) if i < len(valley_idx)]
+        visualize_sdptg_each_beat(norm, valley_sel, fs=fs, n_points=80)
+    else:
+        print("⚠️ 品質合格ビートがありません。SDPTG個別表示をスキップします。")
     df_perbeat, feat_mean, names_all = compute_features_perbeat(norm,valley_idx,final_idx,fs,resampling_rate)
     
     # SQIテーブル
