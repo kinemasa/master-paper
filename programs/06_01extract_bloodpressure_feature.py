@@ -51,15 +51,15 @@ from blood_pressure.get_feature import (
 # 固定パラメータ
 # ============================================================
 FS = 30.0                        # 入力サンプリング周波数[Hz]
-MODE = "non-conservative"        # "conservative" or "non-conservative"
-ESS_THRESHOLDS = {"conservative": 0.796, "non-conservative": 0.30}
+MODE = "conservative"        # "conservative" or "non-conservative"
+ESS_THRESHOLDS = {"conservative": 0.796, "non-conservative": 0.60}
 N_POINTS_QUALITY = 50            # 品質評価用の各ビートのリサンプル点数
 
 # 処理パラメータ（血圧特徴に関係）
 RESAMPLING_RATE = 90             # 代表波形生成などで使用
 MARGIN_PPG = 0
-MARGIN_DPPG = 3
-PLOT_DEBUG = False               # 必要ならTrue
+MARGIN_DPPG = 0
+PLOT_DEBUG =  False       # 必要ならTrue
 
 
 # ============================================================
@@ -98,35 +98,176 @@ def segment_and_resample_by_valleys(x, valleys, n_points=50):
     return beats, ranges
 
 
-def calc_sqi_from_valleys(x, valleys, n_points=N_POINTS_QUALITY):
-    """valley区切りで各ビートを整形し、隣接ビートのSDPTG相関をSQIとする。\n    返り値は長さ len(valleys)-1 の配列。"""
+def calc_sqi_from_valleys(x, valleys, n_points=N_POINTS_QUALITY, mode="sdptg"):
+    """
+    各ビートをvalley区切りで整形し、隣接ビート間の相関をSQIとする。
+    modeで「どの波形」を使うかを選択可能。
+
+    Parameters
+    ----------
+    x : np.ndarray
+        入力波形（PPGなど）
+    valleys : list or np.ndarray
+        谷（ビート境界）のインデックス
+    n_points : int
+        各ビートをリサンプルする点数
+    mode : str
+        "raw"   -> 原波形そのもの
+        "diff1" -> 一次微分（速度波）
+        "diff2" or "sdptg" -> 二次微分（SDPTG）
+    
+    Returns
+    -------
+    sqi : np.ndarray
+        各ビート間の相関係数（長さ len(valleys)-1）
+    """
+
     beats_rs, ranges = segment_and_resample_by_valleys(x, valleys, n_points)
 
-    # 2次微分（SDPTG）
-    def sdptg(y):
-        g1 = np.gradient(y, axis=-1)
-        g2 = np.gradient(g1, axis=-1)
-        return g2
+    def _derivative(y, order=0):
+        if order == 0:
+            return y
+        g = np.gradient(y, axis=-1)
+        if order == 1:
+            return g
+        elif order == 2:
+            g2 = np.gradient(g, axis=-1)
+            return g2
+        else:
+            raise ValueError("order must be 0, 1, or 2")
+
+    # modeに応じた導関数レベルを決定
+    if mode.lower() in ["raw", "ppg"]:
+        order = 0
+    elif mode.lower() in ["diff1", "first"]:
+        order = 1
+    elif mode.lower() in ["diff2", "sdptg", "second"]:
+        order = 2
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
 
     sqi = np.full(len(beats_rs), np.nan)
-    sd2 = []
+    proc_beats = []
+
     for b in beats_rs:
         if b is None:
-            sd2.append(None)
+            proc_beats.append(None)
         else:
-            sd2.append(sdptg(b))
+            proc_beats.append(_derivative(b, order=order))
 
-    for i in range(len(sd2) - 1):
-        if sd2[i] is None or sd2[i + 1] is None:
+    for i in range(len(proc_beats) - 1):
+        if proc_beats[i] is None or proc_beats[i + 1] is None:
             continue
-        r = pearsonr(sd2[i], sd2[i + 1])[0]
+        r = pearsonr(proc_beats[i], proc_beats[i + 1])[0]
         sqi[i] = r
+
     return sqi
 
 
 def classify_quality(sqi, mode=MODE):
     th = ESS_THRESHOLDS[mode]
     return sqi >= th
+
+def visualize_sqi_selection(x, valleys, fs=None, n_points=30, mode="sdptg", th=0.80,
+                            zscore_per_beat=True, title=None):
+    """
+    目的:
+      - どのビート間がしきい値以上(SQI>=th)だったかを着色して表示
+      - SQIの推移としきい値線を表示
+
+    前提:
+      - calc_sqi_from_valleys(x, valleys, n_points, mode) が定義済み
+      - segment_and_resample_by_valleys(x, valleys, n_points) が定義済み
+
+    返り値:
+      dict with keys:
+        'sqi'      : (N_beats-1,) の配列
+        'mask'     : (N_beats-1,) の bool 配列 (SQI>=th)
+        'ranges'   : 各ビート (start,end) サンプル範囲 のリスト
+        'mode'     : 使用モード
+    """
+    # 1) SQIを計算（あなたの関数をそのまま使用）
+    sqi = calc_sqi_from_valleys(x, valleys, n_points=n_points, mode=mode)
+
+    # 2) 可視化に必要なビート区間を取得
+    beats_rs, ranges = segment_and_resample_by_valleys(x, valleys, n_points)
+
+    # 3) 表示用の時系列軸
+    if fs is None:
+        t = np.arange(len(x))
+        xlabel = "Samples"
+    else:
+        t = np.arange(len(x)) / float(fs)
+        xlabel = "Time [s]"
+
+    # 4) モードに対応する系列（raw/diff1/diff2）をビート×点の行列に
+    def _derivative(y, order=0):
+        if order == 0: return y
+        g1 = np.gradient(y, axis=-1)
+        if order == 1: return g1
+        g2 = np.gradient(g1, axis=-1)
+        return g2
+    mode2order = {"raw":0, "ppg":0, "diff1":1, "first":1, "diff2":2, "sdptg":2, "second":2}
+    order = mode2order.get(mode.lower(), 2)
+
+    mat = []
+    for b in beats_rs:
+        if b is None:
+            mat.append(np.full(n_points, np.nan))
+        else:
+            z = _derivative(b, order=order)
+            if zscore_per_beat:
+                mu = np.nanmean(z); st = np.nanstd(z)
+                z = (z - mu) / st if (st and st > 0) else (z - mu)
+            mat.append(z)
+    mat = np.vstack(mat)  # shape: (N_beats, n_points)
+
+    # 5) ビート中心時刻（SQIをプロットする横軸に使う）
+    centers_t = []
+    for (s, e) in ranges:
+        c = int(round((s + e) * 0.5))
+        c = min(max(c, 0), len(t)-1)
+        centers_t.append(t[c])
+    centers_t = np.asarray(centers_t)
+
+    # 6) SQIの選別マスク
+    mask = sqi >= th
+
+    # 7) プロット
+    fig = plt.figure(figsize=(12, 9))
+    gs = fig.add_gridspec(3, 1, height_ratios=[2.2, 2.0, 1.4], hspace=0.18)
+
+    # (a) 原波形 + 谷 + 区間着色（緑=採用, 赤=不採用）
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(t, x, lw=1.1, label="PPG")
+    for vi in valleys:
+        if 0 <= vi < len(t):
+            ax1.axvline(t[vi], color="k", alpha=0.25, lw=0.8)
+    # 区間はビート i、SQIはビート i と i+1 の相関なので、i の区間に色を塗る
+    for i, (s, e) in enumerate(ranges[:-1]):
+        s = max(0, s); e = min(len(t)-1, e)
+        color = (0.2, 0.7, 0.3, 0.25) if (not np.isnan(sqi[i]) and mask[i]) else (0.9, 0.2, 0.2, 0.20)
+        ax1.axvspan(t[s], t[e], color=color)
+    ax1.set_ylabel("Amplitude")
+    ax1.set_title(title or f"SQI selection (mode={mode}, th={th:.2f})")
+    ax1.legend(loc="upper right")
+
+
+    # (c) SQIの推移
+    ax2 = fig.add_subplot(gs[2, 0])
+    # SQIの横軸は「前のビート中心」に置く（ranges[:-1]に対応）
+    x_sqi = centers_t[:len(sqi)]
+    ax2.plot(x_sqi, sqi, marker='o', lw=1.2, label="SQI (adjacent corr.)")
+    ax2.axhline(th, ls='--', lw=1.0, label=f"threshold = {th:.2f}")
+    ax2.set_xlabel(xlabel)
+    ax2.set_ylabel("SQI (r)")
+    ax2.set_ylim(-1.05, 1.05)
+    ax2.grid(alpha=0.25)
+    ax2.legend(loc="lower right")
+
+    plt.show()
+
+    return {'sqi': sqi, 'mask': mask, 'ranges': ranges, 'mode': mode}
 
 
 # ============================================================
@@ -165,30 +306,45 @@ def extract_bp_features_with_quality(csv_file,
         raise ValueError("検出されたビート(谷)が少なすぎます")
 
     # --- 品質スコア(SQI)算出: valley基準で隣接SDPTG相関 ---
-    sqi = calc_sqi_from_valleys(norm, valley_idx, n_points=N_POINTS_QUALITY)
-    quality_mask = classify_quality(sqi, mode=mode)  # 長さ: len(valley_idx)-1
-
+    sqi_ppg = calc_sqi_from_valleys(norm, valley_idx,mode="ppg", n_points=N_POINTS_QUALITY)
+    sqi_sdptg = calc_sqi_from_valleys(norm, valley_idx,mode="sdptg", n_points=N_POINTS_QUALITY)
+    
+    sqi = sqi_ppg
+    
+    quality_ppg_mask = classify_quality(sqi_ppg, mode=mode)  # 長さ: len(valley_idx)-1
+    quality_sdptg_mask = classify_quality(sqi_sdptg, mode=mode)  # 長さ: len(valley_idx)-1
+    
+    quality_mask = quality_ppg_mask & quality_sdptg_mask
     # --- 既存の受入判定（形状/面積/SDPPG） ---
     amplitude_list, acceptable_ppg_idx, acceptable_area_idx, pulse_num = analyze_ppg_pulse(
-        norm, valley_idx, debug
+        norm, valley_idx,debug
     )
-    acceptable_sdppg_idx, pulse_num2 = analyze_dppg_pulse(
-        norm, valley_idx, margin_dppg, debug
-    )
-
+    
     # --- 最終採用ビート: 4条件のAND ---
     # 添字は valley区間 [i, i+1) に対するビート番号 (0..len(valley)-2)
-    quality_idx = set(np.where(quality_mask)[0].tolist())
-    final_idx = list(
-        set(acceptable_ppg_idx)
-        & set(acceptable_area_idx)
-        & set(acceptable_sdppg_idx)
-        & quality_idx
-    )
+    quality_idx = set(np.where(quality_ppg_mask)[0].tolist())
+    # final_idx = list(
+    #     set(acceptable_ppg_idx)
+    #     & set(acceptable_area_idx)
+    #     & quality_idx
+    # 
+    final_idx = quality_idx
     final_idx = sorted(final_idx)
     if len(final_idx) == 0:
         raise ValueError("品質/受入条件を満たすビートがありません。閾値やパラメータを見直してください。")
-
+    
+    out1 = visualize_sqi_selection(
+    norm, valley_idx, fs=30.0, n_points=50,
+    mode="raw",       # "raw" / "diff1" / "sdptg"
+    th=0.80,
+    title="Which beats are selected?")
+    
+    out2 = visualize_sqi_selection(
+    norm, valley_idx, fs=30.0, n_points=50,
+    mode="sdptg",       # "raw" / "diff1" / "sdptg"
+    th=0.80,
+    title="Which beats are selected?")
+    
     # --- 代表波形の生成と特徴抽出（既存関数を活用） ---
     t1_for_ppg, pulse_up_ppg, pulse_orig_ppg, success_ppg = generate_t1(
         norm, valley_idx, amplitude_list, final_idx, resampling_rate, margin_ppg
@@ -242,14 +398,13 @@ def extract_bp_features_with_quality(csv_file,
     t = np.arange(len(norm)) / fs
     seg_times = np.array([(t[s], t[e]) for s, e in zip(valley_idx[:-1], valley_idx[1:])])
     seg_table = pd.DataFrame({
-        "beat_idx": np.arange(len(sqi)),
+        "beat_idx": np.arange(len(sqi_ppg)),
         "start_time": seg_times[:, 0],
         "end_time": seg_times[:, 1],
         "sqi": sqi,
         "quality": quality_mask,
         "accepted_ppg": [i in acceptable_ppg_idx for i in range(len(sqi))],
         "accepted_area": [i in acceptable_area_idx for i in range(len(sqi))],
-        "accepted_sdppg": [i in acceptable_sdppg_idx for i in range(len(sqi))],
         "final": [i in final_idx for i in range(len(sqi))],
     })
 
@@ -272,58 +427,6 @@ def extract_bp_features_with_quality(csv_file,
     return df_out, seg_table
 
 
-# ============================================================
-# 可視化: どのビートが品質採用されたかを描く
-# ============================================================
-
-def plot_quality_selection(t, signal_norm, valley_idx, seg_table, fs, save_path=None, title="Quality-selected beats"):
-    """緑=最終採用(final)、黄=品質OKだが他条件NG、赤=品質NG、の帯で可視化。
-    また下段にSQIの推移と閾値線を描く。
-    save_pathにPath/strを渡すとPNG保存。"""
-    import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(12,6))
-
-    # 上: 波形 + 区間帯
-    ax1 = fig.add_subplot(2,1,1)
-    ax1.plot(t, signal_norm, lw=1, label="normalized(Env)")
-
-    # 区間色分け
-    for i,row in seg_table.iterrows():
-        s,e = row["start_time"], row["end_time"]
-        if row["final"]:
-            ax1.axvspan(s, e, color="lightgreen", alpha=0.4)
-        elif row["quality"]:
-            ax1.axvspan(s, e, color="khaki", alpha=0.35)
-        else:
-            ax1.axvspan(s, e, color="lightcoral", alpha=0.3)
-
-    # 凡例用ダミー
-    from matplotlib.patches import Patch
-    patches = [
-        Patch(facecolor="lightgreen", alpha=0.4, label="採用(final)"),
-        Patch(facecolor="khaki", alpha=0.35, label="品質OKだが他条件NG"),
-        Patch(facecolor="lightcoral", alpha=0.3, label="品質NG"),
-    ]
-    ax1.legend(handles=patches, loc="upper right")
-    ax1.set_title(title)
-    ax1.set_xlabel("Time [s]")
-    ax1.set_ylabel("Amplitude (a.u.)")
-
-    # 下: SQI
-    ax2 = fig.add_subplot(2,1,2)
-    mid_t = (seg_table["start_time"] + seg_table["end_time"]) / 2
-    ax2.plot(mid_t, seg_table["sqi"], "o-", label="SQI")
-    ax2.axhline(ESS_THRESHOLDS["conservative"], ls="--", color="r", label="TH(cons)")
-    ax2.axhline(ESS_THRESHOLDS["non-conservative"], ls="--", color="orange", label="TH(non-cons)")
-    ax2.set_ylim(-1,1)
-    ax2.set_xlabel("Time [s]")
-    ax2.set_ylabel("SQI")
-    ax2.legend()
-    fig.tight_layout()
-
-    if save_path is not None:
-        fig.savefig(save_path, dpi=200, bbox_inches="tight")
-    plt.show()
 
 
 # ============================================================
@@ -355,30 +458,8 @@ if __name__ == "__main__":
     seg_csv = save_dir / (Path(csv_path).stem + "_segments.csv")
     seg_tbl.to_csv(seg_csv, index=False, encoding="utf-8-sig")
 
-    # 可視化PNG保存 + 画面表示
-    # 時刻軸と正規化信号を再構成
-    # extract内のnormは返していないので、ここで再計算
-    df_in = pd.read_csv(csv_path)
-    sig_src = None
-    for cand in ["pred_ppg","true_ppg","lgi","pos","chrom","ica", df_in.columns[1]]:
-        if cand in df_in.columns:
-            sig_src = df_in[cand].to_numpy().astype(float)
-            break
-    if sig_src is not None:
-        sig_f = bandpass_ppg(sig_src, FS)
-        sig_n, _ = normalize_by_envelope(sig_f)
-        t = np.arange(len(sig_n)) / FS
-        # valleyを復元するため、軽くピーク検出
-        _, valley_idx = detect_pulse_peak(sig_n, FS)
-        # 可視化
-        fig_path = save_dir / (Path(csv_path).stem + "_quality_selection.png")
-        plot_quality_selection(t, sig_n, valley_idx, seg_tbl, FS, save_path=fig_path)
 
     print("=== 抽出特徴量 ===")
     print(df_feat.to_string(index=False))
     print(f"✅ 特徴CSV: {save_path}")
     print(f"✅ セグメントCSV: {seg_csv}")
-    if 'fig_path' in locals():
-        print(f"✅ 可視化PNG: {fig_path}")
-    else:
-        print("ℹ️ 可視化PNGは元列の推定に失敗したためスキップしました。")
