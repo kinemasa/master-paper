@@ -261,8 +261,8 @@ def visualize_all_derivatives_each_beat(norm_signal, valley_idx, fs=30.0, n_poin
         tdptg = np.gradient(sdptg)  # 三次微分（jerk）
 
         # ---- 標準化（比較しやすく） ----
-        def z(x): return (x - np.mean(x)) / (np.std(x)+1e-8)
-        ppg_rs_z, dppg_z, sdptg_z, tdptg_z = map(z, [ppg_rs, dppg, sdptg, tdptg])
+        # def z(x): return (x - np.mean(x)) / (np.std(x)+1e-8)
+        ppg_rs_z, dppg_z, sdptg_z, tdptg_z =  ppg_rs, dppg, sdptg, tdptg
 
         # ---- a,b,c,d,e点検出（二次微分上で） ----
         peaks, _ = find_peaks(sdptg_z, distance=5)
