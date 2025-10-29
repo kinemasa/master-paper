@@ -415,13 +415,13 @@ def extract_bp_features_with_quality(csv_path, fs=FS, resampling_rate=RESAMPLING
     if "pred_ppg_mean" not in df.columns:
         raise ValueError("CSVに 'pred_ppg_mean' 列が必要です。")
     sig = df["pred_ppg_mean"].to_numpy()
-    filt = bandpass_ppg(sig, fs)
+    # filt = bandpass_ppg(sig, fs)
     
     # norm, env = normalize_by_envelope(filt)
-    norm = bandpass_ppg(sig, fs)
+    norm = sig
         # --- PPG, DPPG, SDPTGの可視化 ---
-    dppg  = np.gradient(filt)
-    sdptg = np.gradient(dppg)
+    # dppg  = np.gradient(filt)
+    # sdptg = np.gradient(dppg)
     t = np.arange(len(norm)) / fs
     
     peak_idx, valley_idx = detect_pulse_peak(norm, fs)
