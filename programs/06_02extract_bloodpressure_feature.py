@@ -281,7 +281,7 @@ def visualize_all_derivatives_each_beat(norm_signal, valley_idx, fs=30.0, n_poin
             if len(after_d)>0: e=after_d[0]
 
         # ---- プロット（4段）----
-        fig, axes = plt.subplots(4, 1, figsize=(9, 7), sharex=True)
+        fig, axes = plt.subplots(2, 2, figsize=(10, 6), sharex=True)
         fig.suptitle(f"Beat {i+1}/{n_beats} : PPG & its derivatives", y=1.02)
 
         # PPG
@@ -416,7 +416,7 @@ def extract_bp_features_with_quality(csv_path, fs=FS, resampling_rate=RESAMPLING
     norm, env = normalize_by_envelope(filt)
     
         # --- PPG, DPPG, SDPTGの可視化 ---
-    dppg  = np.gradient(norm)
+    dppg  = np.gradient(filt)
     sdptg = np.gradient(dppg)
     t = np.arange(len(norm)) / fs
     
