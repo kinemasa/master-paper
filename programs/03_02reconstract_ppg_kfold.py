@@ -102,7 +102,7 @@ def export_all_predictions(model, loader, device, fs, out_dir: Path, subset_name
 
 def main():
     # ===================== 設定ここに集約 =====================
-    exp_name = "glallea_before_lstm-attention_onlymse_do2-10sec"  ## roi-phase-model-loss
+    exp_name = "glallea_before_lstm-notattention_onlymse_do2-10sec"  ## roi-phase-model-loss
 
     # Dataset設定
     framerate = 30
