@@ -231,6 +231,30 @@ def extract_bp_features_with_quality(csv_path, fs=FS, resampling_rate=RESAMPLING
     sig = df["pred_ppg_mean"].to_numpy()
     filt = bandpass_ppg(sig, fs)
     norm, env = normalize_by_envelope(filt)
+    
+        # --- PPG, DPPG, SDPTGの可視化 ---
+    dppg  = np.gradient(norm)
+    sdptg = np.gradient(dppg)
+    t = np.arange(len(norm)) / fs
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+    axes[0].plot(t, norm, color="black", label="Normalized PPG")
+    axes[0].set_ylabel("PPG")
+    axes[0].legend(loc="upper right")
+
+    axes[1].plot(t, dppg, color="blue", label="First derivative (DPPG)")
+    axes[1].set_ylabel("dPPG")
+    axes[1].legend(loc="upper right")
+
+    axes[2].plot(t, sdptg, color="red", label="Second derivative (SDPTG)")
+    axes[2].set_ylabel("SDPTG")
+    axes[2].set_xlabel("Time [s]")
+    axes[2].legend(loc="upper right")
+
+    plt.suptitle("PPG and its derivatives")
+    plt.tight_layout()
+    plt.show()
+    
     peak_idx, valley_idx = detect_pulse_peak(norm, fs)
     if len(valley_idx)<3: raise ValueError("谷が少なすぎます。")
 
